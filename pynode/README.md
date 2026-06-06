@@ -4,10 +4,36 @@ Python implementation of the DTF protocol.
 
 Run commands from the repository root with `PYTHONPATH=pynode`.
 
+Install TUI dependencies:
+
+```sh
+cd pynode
+python3 -m pip install -r requirements.txt
+```
+
 Serve files:
 
 ```sh
-PYTHONPATH=pynode python3 -m dtf.cli --name alice --port 4747 serve ./shared
+PYTHONPATH=pynode python3 -m dtf.cli --port 4747 serve ./shared
+```
+
+Run the combined server/client Textual TUI:
+
+```sh
+PYTHONPATH=pynode python3 -m dtf.cli tui ./shared
+```
+
+The TUI serves `./shared`, discovers peers with broadcast, lists peer files, and
+downloads selected files into `$HOME/Downloads`. Each successful download is
+also copied into the served folder so it becomes available to other peers.
+If `--name` is omitted, the peer starts with a random two-word name such as
+`green robert`.
+
+Find DTF peers on the local network:
+
+```sh
+PYTHONPATH=pynode python3 -m dtf.cli peers
+PYTHONPATH=pynode python3 -m dtf.cli peers 192.168.1.255:4747 --timeout 1
 ```
 
 Find files from a known peer:
@@ -27,3 +53,17 @@ PYTHONPATH=pynode python3 -m dtf.cli download 127.0.0.1:4747 \
 
 Every sent and received DTF command is logged to stdout as `TX ...` or `RX ...`
 with peer address, request ID, and session ID.
+
+## Make targets
+
+From the `pynode` directory:
+
+```sh
+make serve SERVE_PATHS=./shared PORT=4747
+make tui SERVE_PATHS=./shared
+make peers
+make peers TARGETS=192.168.1.255:4747 ARGS="--timeout 1"
+make find PEER=127.0.0.1:4747 KIND=substring QUERY=report
+make download PEER=127.0.0.1:4747 FILE_ID=... OUTPUT=./downloaded-file
+make test
+```
