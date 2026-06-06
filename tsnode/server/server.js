@@ -6,8 +6,9 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
+import { decodeDtfPacket } from "../dist/codec.js";
 import { createDtfClient, createDtfFileServer } from "../dist/index.js";
-import { DTF_DEFAULT_PORT } from "../dist/types.js";
+import { DTF_DEFAULT_PORT, DtfMessageType } from "../dist/types.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_UPLOADS_DIR = path.join(packageRoot, "files", "uploads");
@@ -18,6 +19,7 @@ const DEFAULT_CHUNK_SIZE = 64 * 1024;
 const DEFAULT_HTTP_PORT = 8787;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 20;
+const MAX_LOG_ENTRIES = 200;
 
 export function createDtfServer(options = {}) {
   const listenPort = Number(options.port ?? process.env.DTF_PORT ?? DTF_DEFAULT_PORT);
@@ -37,6 +39,7 @@ export function createDtfServer(options = {}) {
   const httpHost = options.httpHost ?? process.env.DTF_HTTP_HOST ?? host;
   const socket = dgram.createSocket("udp4");
   const subscribers = new Set();
+  const logger = createServerLogger();
   const localPeer = {
     ...dataset.localPeer,
     name: options.peerName ?? process.env.DTF_PEER_NAME ?? dataset.localPeer.name,
@@ -56,6 +59,7 @@ export function createDtfServer(options = {}) {
   }));
   const transport = {
     send(bytes, address) {
+      logDatagram(logger, "TX", bytes, address);
       socket.send(Buffer.from(bytes), address.port, address.address);
     },
     subscribe(handler) {
@@ -74,14 +78,16 @@ export function createDtfServer(options = {}) {
   });
 
   socket.on("message", (bytes, address) => {
+    logDatagram(logger, "RX", bytes, address);
     for (const subscriber of subscribers) {
       subscriber({ bytes, address });
     }
   });
 
   const bridge = bridgeEnabled
-    ? createBridge({ dataset, files: apiFiles, localPeer, webDistDir: options.webDistDir })
+    ? createBridge({ dataset, files: apiFiles, localPeer, webDistDir: options.webDistDir, logger })
     : undefined;
+  logger.write(`DTF peer listening on ${host}:${listenPort}`);
 
   return {
     socket,
@@ -238,9 +244,22 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 }
 
-function createBridge({ dataset, files, localPeer, webDistDir }) {
+function createBridge({ dataset, files, localPeer, webDistDir, logger }) {
   const sockets = new Set();
   const staticRoot = path.resolve(webDistDir ?? process.env.DTF_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
+  const broadcast = (message) => {
+    const body = JSON.stringify(message);
+    for (const socket of sockets) {
+      if (socket.readyState === socket.OPEN) {
+        socket.send(body);
+      }
+    }
+  };
+
+  logger.subscribe((entry) => {
+    broadcast({ type: "log", entry });
+  });
+
   const httpServer = http.createServer((request, response) => {
     response.setHeader("Access-Control-Allow-Origin", "*");
     response.setHeader("Access-Control-Allow-Headers", "content-type");
@@ -259,7 +278,7 @@ function createBridge({ dataset, files, localPeer, webDistDir }) {
     const url = new URL(request.url, "http://localhost");
 
     if (url.pathname === "/api/download" && request.method === "POST") {
-      void handleDownloadRequest({ request, response, dataset });
+      void handleDownloadRequest({ request, response, dataset, logger });
       return;
     }
 
@@ -299,8 +318,15 @@ function createBridge({ dataset, files, localPeer, webDistDir }) {
       return;
     }
 
+    if (url.pathname === "/api/logs") {
+      sendJson(response, 200, {
+        records: logger.entries()
+      });
+      return;
+    }
+
     if (url.pathname === "/api/discover") {
-      void handleDiscoverRequest({ url, response, localPeer });
+      void handleDiscoverRequest({ url, response, localPeer, logger });
       return;
     }
 
@@ -349,20 +375,19 @@ function createBridge({ dataset, files, localPeer, webDistDir }) {
         downloadsDir: dataset.downloadsDir
       })
     );
+    socket.send(
+      JSON.stringify({
+        type: "logs",
+        records: logger.entries()
+      })
+    );
     socket.on("close", () => sockets.delete(socket));
   });
 
   return {
     httpServer,
     wsServer,
-    broadcast(message) {
-      const body = JSON.stringify(message);
-      for (const socket of sockets) {
-        if (socket.readyState === socket.OPEN) {
-          socket.send(body);
-        }
-      }
-    }
+    broadcast
   };
 }
 
@@ -400,7 +425,7 @@ function safeStaticPath(staticRoot, requestPath) {
   return filePath;
 }
 
-async function handleDownloadRequest({ request, response, dataset }) {
+async function handleDownloadRequest({ request, response, dataset, logger }) {
   try {
     const body = await readJsonBody(request);
     const record = body.file;
@@ -411,7 +436,7 @@ async function handleDownloadRequest({ request, response, dataset }) {
     }
 
     const socket = dgram.createSocket("udp4");
-    const transport = createUdpClientTransport(socket);
+    const transport = createUdpClientTransport(socket, logger);
     const client = createDtfClient({
       localPeer: {
         peerId: DOWNLOAD_CLIENT_PEER_ID,
@@ -429,6 +454,7 @@ async function handleDownloadRequest({ request, response, dataset }) {
     try {
       await bindUdpClient(socket);
       socket.setBroadcast(true);
+      logger.write(`Downloading ${record.name}...`);
 
       const bytes = await client.downloadFile(record, {
         verifyIntegrity: true
@@ -437,6 +463,7 @@ async function handleDownloadRequest({ request, response, dataset }) {
         downloadsDir: dataset.downloadsDir,
         uploadsDir: dataset.uploadsDir
       });
+      logger.write(`Downloaded ${record.name} (${bytes.byteLength} bytes) to ${path}`);
 
       sendJson(response, 200, {
         ok: true,
@@ -450,6 +477,7 @@ async function handleDownloadRequest({ request, response, dataset }) {
       socket.close();
     }
   } catch (error) {
+    logger.write(`Download failed: ${error instanceof Error ? error.message : "Download failed"}`);
     sendJson(response, 502, {
       error: "download-failed",
       message: error instanceof Error ? error.message : "Download failed"
@@ -473,12 +501,12 @@ function readJsonBody(request) {
   });
 }
 
-async function handleDiscoverRequest({ url, response, localPeer }) {
+async function handleDiscoverRequest({ url, response, localPeer, logger }) {
   const page = positiveInt(url.searchParams.get("page"), 1);
   const pageSize = Math.min(positiveInt(url.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
   const target = parseAddress(url.searchParams.get("address") ?? "10.2.0.255:4747");
   const socket = dgram.createSocket("udp4");
-  const transport = createUdpClientTransport(socket);
+  const transport = createUdpClientTransport(socket, logger);
   const client = createDtfClient({
     localPeer: {
       peerId: DOWNLOAD_CLIENT_PEER_ID,
@@ -497,6 +525,7 @@ async function handleDiscoverRequest({ url, response, localPeer }) {
   try {
     await bindUdpClient(socket);
     socket.setBroadcast(true);
+    logger.write(`Finding peers via broadcast ${target.address}:${target.port}`);
 
     const discovered = await client.findAvailableFiles({
       queryKind: "all",
@@ -519,7 +548,9 @@ async function handleDiscoverRequest({ url, response, localPeer }) {
       total: records.length,
       records: records.slice(start, start + pageSize)
     });
+    logger.write(`Found ${records.length} remote file(s)`);
   } catch (error) {
+    logger.write(`Peer discovery failed: ${error instanceof Error ? error.message : "Discovery failed"}`);
     sendJson(response, 502, {
       error: "discovery-failed",
       message: error instanceof Error ? error.message : "Discovery failed"
@@ -616,11 +647,11 @@ function downloadPathForFile(downloadsDir, file) {
   const parsed = path.parse(filename);
   const base = sanitizePathPart(parsed.name || "download");
   const extension = /^\.[a-zA-Z0-9]+$/.test(parsed.ext) ? parsed.ext : "";
-  const outputPath = path.resolve(downloadsDir, ...parts, `${base}-${file.fileId.slice(0, 12)}${extension}`);
+  const outputPath = path.resolve(downloadsDir, ...parts, `${base}${extension}`);
   const relative = path.relative(downloadsDir, outputPath);
 
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    return path.join(downloadsDir, `${base}-${file.fileId.slice(0, 12)}${extension}`);
+    return path.join(downloadsDir, `${base}${extension}`);
   }
 
   return outputPath;
@@ -684,10 +715,11 @@ function tagsForPath(relativeName) {
   return [...new Set(["upload", ...directoryTags, extension].filter(Boolean))];
 }
 
-function createUdpClientTransport(socket) {
+function createUdpClientTransport(socket, logger = { write() {} }) {
   const subscribers = new Set();
 
   socket.on("message", (bytes, address) => {
+    logDatagram(logger, "RX", bytes, address);
     for (const subscriber of subscribers) {
       subscriber({ bytes: new Uint8Array(bytes), address });
     }
@@ -695,6 +727,7 @@ function createUdpClientTransport(socket) {
 
   return {
     send(bytes, address) {
+      logDatagram(logger, "TX", bytes, address);
       socket.send(Buffer.from(bytes), address.port, address.address);
     },
     subscribe(handler) {
@@ -793,4 +826,91 @@ function sessionIdFromUuid() {
 function positiveInt(value, fallback) {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function createServerLogger() {
+  const records = [];
+  const subscribers = new Set();
+
+  return {
+    write(line) {
+      const entry = {
+        id: `${Date.now()}-${records.length}`,
+        time: new Date().toISOString(),
+        line
+      };
+
+      records.push(entry);
+
+      if (records.length > MAX_LOG_ENTRIES) {
+        records.shift();
+      }
+
+      console.log(line);
+
+      for (const subscriber of subscribers) {
+        subscriber(entry);
+      }
+    },
+    entries() {
+      return [...records];
+    },
+    subscribe(handler) {
+      subscribers.add(handler);
+      return () => subscribers.delete(handler);
+    }
+  };
+}
+
+function logDatagram(logger, direction, bytes, address) {
+  const packet = decodeDtfPacket(bytes);
+
+  if (!packet) {
+    logger.write(`${direction} INVALID ${address.address}:${address.port}`);
+    return;
+  }
+
+  logger.write(
+    `${direction} ${messageTypeName(packet.type)} ${address.address}:${address.port} ` +
+      `request_id=${packet.requestId.toString(16).padStart(16, "0")} ` +
+      `session_id=${packet.sessionId.toString(16).padStart(16, "0")}${messageLogDetail(packet)}`
+  );
+}
+
+function messageTypeName(type) {
+  return DtfMessageType[type] ?? `UNKNOWN_0x${type.toString(16).padStart(2, "0")}`;
+}
+
+function messageLogDetail(packet) {
+  const payload = packet.payload;
+
+  if (packet.type === DtfMessageType.GetRange) {
+    return ` range=${payload.fromOffset}:${payload.toOffset} file_id=${shortId(payload.fileId)}`;
+  }
+
+  if (packet.type === DtfMessageType.RangeData) {
+    return ` offset=${payload.dataOffset} len=${payload.data.byteLength} file_id=${shortId(payload.fileId)}`;
+  }
+
+  if (packet.type === DtfMessageType.RangeDone) {
+    return ` sent=${payload.sentBytes} file_id=${shortId(payload.fileId)}`;
+  }
+
+  if (packet.type === DtfMessageType.Files) {
+    return ` records=${payload.records.length} total=${payload.totalMatches}`;
+  }
+
+  if (packet.type === DtfMessageType.FindFiles) {
+    return ` query_kind=${payload.queryKind} max_results=${payload.maxResults}`;
+  }
+
+  if (packet.type === DtfMessageType.Error) {
+    return ` error=${payload.errorCode} detail=${payload.detail}`;
+  }
+
+  return "";
+}
+
+function shortId(value) {
+  return String(value).slice(0, 16);
 }
