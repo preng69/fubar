@@ -12,6 +12,7 @@ from dtf.peer import (
     DiscoveredPeer,
     DTFPeer,
     RangeRequestError,
+    broadcast_from_ipv4,
     datagram_payload_capacity,
     fit_files_response,
     iter_range_data,
@@ -124,6 +125,12 @@ class PeerRangeTest(unittest.TestCase):
         self.assertFalse(server.is_running)
         server.stop()
         self.assertFalse(server.is_running)
+
+    def test_broadcast_from_ipv4_sets_last_octet_to_255(self) -> None:
+        self.assertEqual(broadcast_from_ipv4("192.168.1.42"), "192.168.1.255")
+        self.assertEqual(broadcast_from_ipv4("10.2.0.9"), "10.2.0.255")
+        with self.assertRaises(ValueError):
+            broadcast_from_ipv4("not-an-ip")
 
     def test_fit_files_response_keeps_payload_inside_datagram_limit(self) -> None:
         records: list[FileRecord] = [

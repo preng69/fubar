@@ -7,7 +7,7 @@ from typing import Sequence
 
 from .files import DEFAULT_CHUNK_SIZE, file_id_from_hex, index_paths
 from .names import random_peer_name
-from .peer import DEFAULT_MAX_RANGE_BYTES, DTFPeer, parse_peer
+from .peer import DEFAULT_MAX_RANGE_BYTES, DTFPeer, default_broadcast_target, parse_peer
 from .protocol import DEFAULT_MAX_DATAGRAM, DEFAULT_PORT, Files, QueryKind
 
 
@@ -42,8 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     peers.add_argument(
         "targets",
         nargs="*",
-        default=["255.255.255.255"],
-        help="broadcast target host or host:port",
+        default=[],
+        help="broadcast target host or host:port; defaults to local IPv4 with .255 last octet",
     )
     peers.add_argument("--timeout", type=float, default=0.5, help="seconds to wait per attempt")
     peers.add_argument("--attempts", type=int, default=2, help="number of broadcast HELLO attempts")
@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--broadcast-target",
         action="append",
         default=[],
-        help="broadcast target host or host:port; defaults to 255.255.255.255",
+        help="broadcast target host or host:port; defaults to local IPv4 with .255 last octet",
     )
 
     return parser
@@ -99,6 +99,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "peers":
         targets = [parse_peer(target, default_port=args.port) for target in args.targets]
+        if not targets:
+            targets = [default_broadcast_target(args.port)]
         peer = DTFPeer(listen_port=args.port, name=peer_name)
         discovered_peers = peer.discover_peers(targets, timeout=args.timeout, attempts=args.attempts)
         for discovered_peer in discovered_peers:
@@ -162,8 +164,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "tui":
         from .tui import run_tui
 
-        raw_targets: list[str] = args.broadcast_target or ["255.255.255.255"]
-        targets = [parse_peer(target, default_port=args.port) for target in raw_targets]
+        targets = [parse_peer(target, default_port=args.port) for target in args.broadcast_target]
+        if not targets:
+            targets = [default_broadcast_target(args.port)]
         run_tui(
             served_folder=args.served_folder,
             name=peer_name,

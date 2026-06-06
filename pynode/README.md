@@ -28,6 +28,9 @@ downloads selected files into `$HOME/Downloads`. Each successful download is
 also copied into the served folder so it becomes available to other peers.
 If `--name` is omitted, the peer starts with a random two-word name such as
 `green robert`.
+The default broadcast target is derived from this machine's local IPv4 address
+by replacing the last octet with `.255`, for example `192.168.1.42` becomes
+`192.168.1.255`.
 
 Find DTF peers on the local network:
 

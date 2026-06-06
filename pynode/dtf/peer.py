@@ -136,6 +136,39 @@ def fit_files_response(
     return Files(total_matches=total_matches, records=tuple(selected))
 
 
+def broadcast_from_ipv4(address: str) -> str:
+    parts: list[str] = address.split(".")
+    if len(parts) != 4:
+        raise ValueError("address must be an IPv4 address")
+    octets: list[int] = [int(part) for part in parts]
+    if any(octet < 0 or octet > 255 for octet in octets):
+        raise ValueError("IPv4 octets must be between 0 and 255")
+    octets[-1] = 255
+    return ".".join(str(octet) for octet in octets)
+
+
+def local_ipv4_address() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            address: str = sock.getsockname()[0]
+    except OSError:
+        try:
+            address = socket.gethostbyname(socket.gethostname())
+        except OSError:
+            return "255.255.255.255"
+    if address.startswith("127."):
+        return "255.255.255.255"
+    return address
+
+
+def default_broadcast_target(port: int = DEFAULT_PORT) -> Address:
+    local_address: str = local_ipv4_address()
+    if local_address == "255.255.255.255":
+        return local_address, port
+    return broadcast_from_ipv4(local_address), port
+
+
 class DTFPeer:
     def __init__(
         self,
