@@ -29,6 +29,9 @@ app refreshes local peer discovery, finds every discovered peer that offers the
 same file ID, then downloads ranges in parallel from those peers. Each
 successful download is also copied into the served folder so it becomes
 available to other peers.
+Peer discovery starts automatically when the TUI opens, and the highlighted peer
+is listed automatically when selection moves. Use `p` and `f` to refresh peers
+or files manually.
 If `--name` is omitted, the peer starts with a random two-word name such as
 `green robert`.
 The default broadcast target is derived from this machine's local IPv4 address

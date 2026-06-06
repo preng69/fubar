@@ -86,16 +86,17 @@ class DtfTuiApp(App[None]):
         self.files: list[FileRecord] = []
         self.selected_peer_key: str | None = None
         self.selected_file_key: str | None = None
+        self.last_auto_listed_peer: Address | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="main"):
             with Vertical(id="peers-pane"):
                 yield Static("Peers")
-                yield DataTable(id="peers")
+                yield DataTable(id="peers", cursor_type="row")
             with Vertical(id="files-pane"):
                 yield Static("Files")
-                yield DataTable(id="files")
+                yield DataTable(id="files", cursor_type="row")
         yield Static("Starting...", id="status")
         yield RichLog(id="log", wrap=True)
         yield Footer()
@@ -108,6 +109,7 @@ class DtfTuiApp(App[None]):
         self.set_interval(0.25, self._drain_logs)
         self.server.start()
         self._set_status(f"Serving {len(self.peer.get_shared_files())} file(s) from {self.served_folder}")
+        self.action_refresh_peers()
 
     def on_unmount(self) -> None:
         self.server.stop()
@@ -118,17 +120,27 @@ class DtfTuiApp(App[None]):
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self._mark_row_selected(event.data_table, event.row_key)
 
+    def on_data_table_cell_highlighted(self, event: DataTable.CellHighlighted) -> None:
+        self._mark_row_index(event.data_table, event.coordinate.row)
+
     def _mark_row_selected(self, data_table: DataTable, row_key: object) -> None:
         key: str = _row_key_to_string(row_key)
+        row_index: int | None = selected_index(key, data_table.cursor_row, data_table.row_count)
+        if row_index is not None:
+            self._mark_row_index(data_table, row_index)
+
+    def _mark_row_index(self, data_table: DataTable, row_index: int) -> None:
         if data_table.id == "peers":
-            self.selected_peer_key = key
+            self.selected_peer_key = str(row_index)
             self.selected_file_key = None
-            peer_index: int | None = selected_index(key, data_table.cursor_row, len(self.peers))
+            peer_index: int | None = selected_index(self.selected_peer_key, row_index, len(self.peers))
             if peer_index is not None:
-                self._set_status(f"Selected peer {peer_label(self.peers[peer_index])}")
+                selected_peer: DiscoveredPeer = self.peers[peer_index]
+                self._set_status(f"Selected peer {peer_label(selected_peer)}")
+                self._auto_list_files(selected_peer)
         elif data_table.id == "files":
-            self.selected_file_key = key
-            file_index: int | None = selected_index(key, data_table.cursor_row, len(self.files))
+            self.selected_file_key = str(row_index)
+            file_index: int | None = selected_index(self.selected_file_key, row_index, len(self.files))
             if file_index is not None:
                 self._set_status(f"Selected file {file_label(self.files[file_index])}")
 
@@ -141,6 +153,7 @@ class DtfTuiApp(App[None]):
         if selected is None:
             self._set_status("Select a peer first")
             return
+        self.last_auto_listed_peer = selected.address
         self._set_status(f"Listing files from {peer_label(selected)}...")
         self._run_thread("list-files", lambda: self._list_files_worker(selected))
 
@@ -167,6 +180,13 @@ class DtfTuiApp(App[None]):
             self.call_from_thread(self._set_status, f"Peer discovery failed: {exc}")
             return
         self.call_from_thread(self._set_peers, peers)
+
+    def _auto_list_files(self, selected: DiscoveredPeer) -> None:
+        if self.last_auto_listed_peer == selected.address:
+            return
+        self.last_auto_listed_peer = selected.address
+        self._set_status(f"Listing files from {peer_label(selected)}...")
+        self._run_thread("auto-list-files", lambda: self._list_files_worker(selected))
 
     def _list_files_worker(self, selected: DiscoveredPeer) -> None:
         try:
@@ -230,6 +250,7 @@ class DtfTuiApp(App[None]):
         self.peers = peers
         self.selected_peer_key = None
         self.selected_file_key = None
+        self.last_auto_listed_peer = None
         table: DataTable = self.query_one("#peers", DataTable)
         table.clear()
         for index, peer in enumerate(peers):
@@ -241,6 +262,9 @@ class DtfTuiApp(App[None]):
             )
         self._set_files([])
         self._set_status(f"Found {len(peers)} peer(s)")
+        if peers:
+            self.selected_peer_key = "0"
+            self._auto_list_files(peers[0])
 
     def _set_files(self, files: list[FileRecord]) -> None:
         self.files = files
