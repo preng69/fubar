@@ -38,6 +38,7 @@ export default function App() {
       void queryClient.invalidateQueries({ queryKey: ["uploads"] });
     }
   });
+  const activeDownloadId = download.variables?.fileId;
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -129,11 +130,17 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => download.mutate(file)}
-                      disabled={download.isPending}
+                      disabled={download.isPending && activeDownloadId === file.fileId}
                     >
-                      Download
+                      {download.isPending && activeDownloadId === file.fileId ? "Saving..." : "Download"}
                     </button>
                   </div>
+                  {download.isSuccess && activeDownloadId === file.fileId ? (
+                    <p className={styles.downloadStatus}>Saved to local uploads.</p>
+                  ) : null}
+                  {download.isError && activeDownloadId === file.fileId ? (
+                    <p className={styles.downloadStatus}>Download failed: {download.error.message}</p>
+                  ) : null}
                   <p className={styles.fileId}>{file.fileId}</p>
                   <div className={styles.tags}>
                     {file.tags.map((tag) => (
