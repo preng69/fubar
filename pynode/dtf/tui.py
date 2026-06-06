@@ -10,7 +10,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, RichLog, Static
 
 from .files import DEFAULT_CHUNK_SIZE, index_paths
-from .peer import Address, BackgroundPeerServer, DTFPeer, DiscoveredPeer
+from .peer import Address, BackgroundPeerServer, DTFPeer, DiscoveredPeer, default_broadcast_target
 from .protocol import DEFAULT_PORT, FileRecord, Files, QueryKind
 from .tui_helpers import (
     app_header_title,
@@ -62,7 +62,7 @@ class DtfTuiApp(App[None]):
         served_folder: Path,
         name: str = "",
         port: int = DEFAULT_PORT,
-        broadcast_targets: Iterable[Address] = (("255.255.255.255", DEFAULT_PORT),),
+        broadcast_targets: Iterable[Address] | None = None,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
     ) -> None:
         super().__init__()
@@ -71,7 +71,7 @@ class DtfTuiApp(App[None]):
         self.peer_name: str = name
         self.title = app_header_title(self.peer_name)
         self.port: int = port
-        self.broadcast_targets: list[Address] = list(broadcast_targets)
+        self.broadcast_targets: list[Address] = list(broadcast_targets or [default_broadcast_target(port)])
         self.chunk_size: int = chunk_size
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.peer: DTFPeer = DTFPeer(
@@ -270,7 +270,7 @@ def run_tui(
     served_folder: Path,
     name: str = "",
     port: int = DEFAULT_PORT,
-    broadcast_targets: Iterable[Address] = (("255.255.255.255", DEFAULT_PORT),),
+    broadcast_targets: Iterable[Address] | None = None,
 ) -> None:
     app: DtfTuiApp = DtfTuiApp(
         served_folder=served_folder,
