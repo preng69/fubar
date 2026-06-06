@@ -1,7 +1,7 @@
 import dgram from "node:dgram";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -395,7 +395,10 @@ async function handleDownloadRequest({ request, response, dataset }) {
       const bytes = await client.downloadFile(record, {
         verifyIntegrity: true
       });
-      const path = await saveDownloadedFile(record, bytes, { downloadsDir: dataset.uploadsDir });
+      const path = await saveCompletedUpload(record, bytes, {
+        downloadsDir: dataset.downloadsDir,
+        uploadsDir: dataset.uploadsDir
+      });
 
       sendJson(response, 200, {
         ok: true,
@@ -545,6 +548,24 @@ async function saveDownloadedFile(file, bytes, options = {}) {
   await writeFile(outputPath, bytes);
 
   return outputPath;
+}
+
+async function saveCompletedUpload(file, bytes, options = {}) {
+  const downloadsDir = path.resolve(options.downloadsDir ?? process.env.DTF_DOWNLOADS_DIR ?? DEFAULT_DOWNLOADS_DIR);
+  const uploadsDir = path.resolve(options.uploadsDir ?? process.env.DTF_UPLOADS_DIR ?? DEFAULT_UPLOADS_DIR);
+
+  await mkdir(downloadsDir, { recursive: true });
+  await mkdir(uploadsDir, { recursive: true });
+
+  const temporaryPath = downloadPathForFile(downloadsDir, file);
+  const finalPath = downloadPathForFile(uploadsDir, file);
+
+  await mkdir(path.dirname(temporaryPath), { recursive: true });
+  await mkdir(path.dirname(finalPath), { recursive: true });
+  await writeFile(temporaryPath, bytes);
+  await rename(temporaryPath, finalPath);
+
+  return finalPath;
 }
 
 function downloadPathForFile(downloadsDir, file) {
