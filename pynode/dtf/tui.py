@@ -12,6 +12,7 @@ from textual.widgets import DataTable, Footer, Header, RichLog, Static
 from .files import DEFAULT_CHUNK_SIZE, index_paths
 from .peer import Address, BackgroundPeerServer, DTFPeer, DiscoveredPeer, default_broadcast_target
 from .protocol import DEFAULT_PORT, FileRecord, Files, QueryKind
+from .swarm import SwarmSource, download_swarm, find_swarm_sources, merge_discovered_peers
 from .tui_helpers import (
     app_header_title,
     copy_into_served_folder,
@@ -185,10 +186,32 @@ class DtfTuiApp(App[None]):
 
     def _download_file_worker(self, selected_peer: DiscoveredPeer, selected_file: FileRecord) -> None:
         try:
+            self.call_from_thread(self._set_status, "Finding swarm sources...")
+            try:
+                refreshed_peers: list[DiscoveredPeer] = self.peer.discover_peers(
+                    self.broadcast_targets,
+                    timeout=0.7,
+                    attempts=2,
+                )
+            except Exception:
+                refreshed_peers = []
+            candidate_peers: list[DiscoveredPeer] = merge_discovered_peers(
+                [*self.peers, selected_peer, *refreshed_peers]
+            )
+            sources: list[SwarmSource] = find_swarm_sources(
+                self.peer,
+                candidate_peers,
+                file_id=selected_file.file_id,
+                file_size=selected_file.file_size,
+            )
+            if not sources:
+                raise RuntimeError("no peers currently offer this file")
+            self.call_from_thread(self._set_status, f"Swarm downloading from {len(sources)} source(s)...")
             downloaded_path: Path = download_path_for(selected_file)
-            self.peer.download(
-                peer=selected_peer.address,
-                record_file_id=selected_file.file_id,
+            result = download_swarm(
+                peer=self.peer,
+                sources=sources,
+                file_id=selected_file.file_id,
                 file_size=selected_file.file_size,
                 output_path=downloaded_path,
             )
@@ -199,7 +222,8 @@ class DtfTuiApp(App[None]):
             return
         self.call_from_thread(
             self._set_status,
-            f"Downloaded to {downloaded_path}; copied to {served_copy}; serving {count} file(s)",
+            f"Swarm downloaded {result.range_count} range(s) from {result.source_count} source(s); "
+            f"copied to {served_copy}; serving {count} file(s)",
         )
 
     def _set_peers(self, peers: list[DiscoveredPeer]) -> None:

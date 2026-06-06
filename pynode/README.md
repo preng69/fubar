@@ -24,8 +24,11 @@ PYTHONPATH=pynode python3 -m dtf.cli tui ./shared
 ```
 
 The TUI serves `./shared`, discovers peers with broadcast, lists peer files, and
-downloads selected files into `$HOME/Downloads`. Each successful download is
-also copied into the served folder so it becomes available to other peers.
+downloads selected files into `$HOME/Downloads`. Downloads use swarm mode: the
+app refreshes local peer discovery, finds every discovered peer that offers the
+same file ID, then downloads ranges in parallel from those peers. Each
+successful download is also copied into the served folder so it becomes
+available to other peers.
 If `--name` is omitted, the peer starts with a random two-word name such as
 `green robert`.
 The default broadcast target is derived from this machine's local IPv4 address

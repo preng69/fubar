@@ -16,6 +16,8 @@ from dtf.peer import (
     datagram_payload_capacity,
     fit_files_response,
     iter_range_data,
+    _message_log_detail,
+    _short_id,
     remember_discovered_peer,
     validate_range_request,
 )
@@ -100,7 +102,18 @@ class PeerRangeTest(unittest.TestCase):
 
         peer._log("TX", header, ("127.0.0.1", 4747))
 
-        self.assertEqual(logs, ["TX HELLO 127.0.0.1:4747 request_id=1 session_id=2"])
+        self.assertEqual(logs, ["TX HELLO 127.0.0.1:4747 request_id=..1 session_id=..2"])
+
+    def test_get_range_log_detail_includes_range_indexes(self) -> None:
+        detail: str = _message_log_detail(
+            GetRange(file_id=b"a" * FILE_ID_LEN, from_offset=1024, to_offset=2048, max_datagram=1200)
+        )
+
+        self.assertEqual(detail, "range=1024:2048 file_id=..6161")
+
+    def test_short_id_truncates_to_last_four_characters(self) -> None:
+        self.assertEqual(_short_id(123456789836), "..9836")
+        self.assertEqual(_short_id(b"\x00\x01\xab\xcd"), "..abcd")
 
     def test_shared_files_can_be_replaced_safely(self) -> None:
         peer: DTFPeer = DTFPeer(logger=lambda _line: None)
