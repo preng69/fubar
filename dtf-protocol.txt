@@ -36,8 +36,8 @@ Peer ID:
     peer process is running.
 
 File ID:
-    A 32-byte identifier for a shared file. The recommended value is the
-    SHA-256 digest of the complete file bytes.
+    A 32-byte identifier for a shared file. It MUST be the SHA-256 digest of
+    the complete file bytes.
 
 Chunk:
     A contiguous byte range from a file.
@@ -208,7 +208,8 @@ query_kind values:
 
     0 = list all available files
     1 = substring match against file name
-    2 = exact file ID lookup; query is 64 lowercase hexadecimal characters
+    2 = exact file ID lookup; query is the SHA-256 file ID encoded as 64
+        lowercase hexadecimal characters
     3 = metadata tag match
 
 max_results is the maximum number of file records requested. If max_results is
@@ -242,6 +243,10 @@ FileRecord:
     media_type      string
     tag_count       u16
     tags            repeated string
+
+file_id is the SHA-256 digest of the complete file bytes. Peers MUST NOT use
+any other identifier in this field. Two FileRecords with the same file_id refer
+to the same complete byte sequence, regardless of name, media_type, or tags.
 
 file_size is the total size of the file in bytes.
 
@@ -467,8 +472,11 @@ Partial completion:
 12. File Integrity
 ------------------
 
-FileRecord.file_id SHOULD be the SHA-256 digest of the complete file bytes.
-After all ranges for a file have been downloaded, the requester SHOULD compute
+FileRecord.file_id MUST be the SHA-256 digest of the complete file bytes. This
+is required for integrity checking and for downloading different byte ranges of
+the same file from multiple peers.
+
+After all ranges for a file have been downloaded, the requester MUST compute
 SHA-256 over the assembled file and compare it to file_id.
 
 If the digest does not match, the downloaded file MUST be treated as invalid.
