@@ -19,6 +19,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepare": "npm run build",
+    "server": "npm run build && node server/server.js",
+    "server:smoke": "npm run build && node server/smoke-test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke": "node scripts/smoke-test.mjs"
   },

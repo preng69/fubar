@@ -3,3 +3,5 @@ dist/
 node_modules/
 tsnode/dist/
 tsnode/node_modules/
+__pycache__/
+*.pyc

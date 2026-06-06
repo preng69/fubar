@@ -73,3 +73,33 @@ npm run build
 npm run typecheck
 npm run smoke
 ```
+
+## UDP Backend Server
+
+The package also includes a JavaScript Node.js UDP server for the draft DTF
+protocol. It uses the compiled TypeScript mock dataset from `dist`, so build
+before running:
+
+```sh
+npm run server
+```
+
+By default the server listens on UDP `0.0.0.0:4747`, which makes it reachable
+from other machines on the same local WiFi using this computer's LAN IP address.
+You can override the bind address, port, and displayed peer name:
+
+```sh
+$env:DTF_HOST = "0.0.0.0"
+$env:DTF_PORT = "4747"
+$env:DTF_PEER_NAME = "Living Room Server"
+npm run server
+```
+
+On Windows, allow Node.js or UDP port `4747` through the firewall if another
+machine cannot reach the server.
+
+Run the UDP smoke test with:
+
+```sh
+npm run server:smoke
+```
