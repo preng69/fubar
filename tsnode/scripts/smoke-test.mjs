@@ -1,45 +1,150 @@
-import { createDtfMockClient } from "../dist/index.js";
+import { createDtfClient, createDtfFileServer, mockDtfDataset } from "../dist/index.js";
+import { decodeDtfPacket } from "../dist/codec.js";
+import { DtfMessageType } from "../dist/types.js";
 
-const client = createDtfMockClient();
-const allFiles = await client.findFiles({ queryKind: "all" });
-
-if (allFiles.records.length !== 3) {
-  throw new Error(`Expected 3 mock files, got ${allFiles.records.length}`);
-}
-
-const taggedFiles = await client.findFiles({ queryKind: "tag", query: "sample" });
-
-if (taggedFiles.records.length !== 2) {
-  throw new Error(`Expected 2 sample-tagged files, got ${taggedFiles.records.length}`);
-}
-
-const firstFile = allFiles.records[0];
-const session = await client.hello({ peerId: firstFile.peers[0].peerId });
-const range = await client.getRange({
-  fileId: firstFile.fileId,
-  fromOffset: 0,
-  toOffset: 128,
-  sessionId: session.sessionId
-});
-
-if (range.data.byteLength !== 128) {
-  throw new Error(`Expected 128 bytes, got ${range.data.byteLength}`);
-}
-
-let progressEvents = 0;
-const download = await client.downloadFile(firstFile.fileId, {
-  sessionId: session.sessionId,
-  onProgress: () => {
-    progressEvents += 1;
+const network = createMultiServerMemoryTransports(
+  ["ada", "build", "quiet"],
+  new Map([["lan", ["ada", "build"]]])
+);
+const client = createDtfClient({
+  localPeer: mockDtfDataset.localPeer,
+  transport: network.clientTransport,
+  discoveryAddresses: ["lan", "quiet"],
+  discoveryResponseTimeoutMs: 1,
+  acceptDiscoveryResponse(_sourceAddress, discoveryAddress) {
+    return discoveryAddress === "lan";
   }
 });
+const servers = [
+  createDtfFileServer({
+    localPeer: mockDtfDataset.peers[0],
+    transport: network.serverTransports.get("ada"),
+    files: [mockDtfDataset.files[0]],
+    contents: mockDtfDataset.contents
+  }),
+  createDtfFileServer({
+    localPeer: mockDtfDataset.peers[1],
+    transport: network.serverTransports.get("build"),
+    files: [mockDtfDataset.files[0]],
+    contents: mockDtfDataset.contents
+  })
+];
 
-if (download.byteLength !== firstFile.fileSize) {
-  throw new Error(`Expected ${firstFile.fileSize} downloaded bytes, got ${download.byteLength}`);
+try {
+  const available = await client.findAvailableFiles({
+    queryKind: "name",
+    query: "handbook"
+  });
+
+  if (available.records.length !== 1) {
+    throw new Error(`Expected one available file, got ${available.records.length}`);
+  }
+
+  const [file] = available.records;
+
+  if (file.peers.length !== 2) {
+    throw new Error(`Expected two serving peers for the available file, got ${file.peers.length}`);
+  }
+
+  let progressEvents = 0;
+  const bytes = await client.downloadFile(file, {
+    chunkSize: 512,
+    maxDatagram: 140,
+    maxParallelRequests: 2,
+    onProgress(progress) {
+      progressEvents += 1;
+
+      if (progress.fileId !== file.fileId) {
+        throw new Error("Expected progress events for the downloaded file");
+      }
+    }
+  });
+  const expectedBytes = mockDtfDataset.contents[file.fileId];
+
+  if (!bytesEqual(bytes, expectedBytes)) {
+    throw new Error("Expected downloaded bytes to match mock content");
+  }
+
+  if (progressEvents === 0) {
+    throw new Error("Expected download progress events");
+  }
+
+  if ((network.rangeRequests.get("ada") ?? 0) === 0 || (network.rangeRequests.get("build") ?? 0) === 0) {
+    throw new Error("Expected parallel download to request ranges from both serving peers");
+  }
+} finally {
+  client.dispose();
+
+  for (const server of servers) {
+    server.dispose();
+  }
 }
 
-if (progressEvents === 0) {
-  throw new Error("Expected download progress events");
+console.log("DTF package smoke test passed");
+
+function createMultiServerMemoryTransports(addresses, routes = new Map()) {
+  const clientHandlers = new Set();
+  const rangeRequests = new Map(addresses.map((address) => [address, 0]));
+  const serverHandlersByAddress = new Map(addresses.map((address) => [address, new Set()]));
+  const serverTransports = new Map(
+    addresses.map((address) => [
+      address,
+      {
+        send(bytes, _address) {
+          for (const handler of [...clientHandlers]) {
+            handler({ bytes, address });
+          }
+        },
+        subscribe(handler) {
+          const handlers = serverHandlersByAddress.get(address);
+          handlers.add(handler);
+          return () => handlers.delete(handler);
+        }
+      }
+    ])
+  );
+
+  const clientTransport = {
+    send(bytes, address) {
+      const route = routes.get(address) ?? [address];
+
+      for (const routedAddress of route) {
+        const handlers = serverHandlersByAddress.get(routedAddress);
+
+        if (!handlers) {
+          continue;
+        }
+
+        const packet = decodeDtfPacket(bytes);
+
+        if (packet?.type === DtfMessageType.GetRange) {
+          rangeRequests.set(routedAddress, (rangeRequests.get(routedAddress) ?? 0) + 1);
+        }
+
+        for (const handler of [...handlers]) {
+          handler({ bytes, address: "client" });
+        }
+      }
+    },
+    subscribe(handler) {
+      clientHandlers.add(handler);
+      return () => clientHandlers.delete(handler);
+    }
+  };
+
+  return { clientTransport, rangeRequests, serverTransports };
 }
 
-console.log("DTF mock smoke test passed");
+function bytesEqual(left, right) {
+  if (left.byteLength !== right.byteLength) {
+    return false;
+  }
+
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}

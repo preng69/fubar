@@ -1,7 +1,7 @@
 {
   "name": "@dtf/mock",
   "version": "0.1.0",
-  "description": "Browser-friendly mock client for the draft DTF protocol.",
+  "description": "Browser-friendly DTF protocol codec, client, responder, and mock dataset.",
   "type": "module",
   "private": true,
   "main": "./dist/index.js",

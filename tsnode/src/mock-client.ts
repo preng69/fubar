@@ -1,3 +1,4 @@
+import { crc32 } from "./checksum.js";
 import { mockDtfDataset } from "./mock-data.js";
 import {
   DTF_DEFAULT_PORT,
@@ -233,20 +234,6 @@ function validateRange(fileId: HexFileId, fileSize: number, fromOffset: number, 
       `Invalid range for ${fileId}: [${fromOffset}, ${toOffset}) outside file size ${fileSize}`
     );
   }
-}
-
-function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
-
-  for (const byte of bytes) {
-    crc ^= byte;
-
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-    }
-  }
-
-  return (crc ^ 0xffffffff) >>> 0;
 }
 
 export function createDtfMockClient(options?: DtfMockClientOptions): DtfMockClient {
