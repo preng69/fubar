@@ -356,7 +356,7 @@ function createBridge({ dataset, files, localPeer }) {
 async function handleDiscoverRequest({ url, response, localPeer }) {
   const page = positiveInt(url.searchParams.get("page"), 1);
   const pageSize = Math.min(positiveInt(url.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
-  const target = parseAddress(url.searchParams.get("address") ?? "255.255.255.255:4747");
+  const target = parseAddress(url.searchParams.get("address") ?? "10.2.0.255:4747");
   const socket = dgram.createSocket("udp4");
   const transport = createUdpClientTransport(socket);
   const client = createDtfClient({
