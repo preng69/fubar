@@ -1,0 +1,257 @@
+:global(*) {
+  box-sizing: border-box;
+}
+
+:global(body) {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: #143528;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #9ebd9e;
+}
+
+:global(button) {
+  font: inherit;
+}
+
+.shell {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  padding: 48px clamp(16px, 4vw, 56px);
+  background:
+    radial-gradient(circle at 20% 10%, rgba(221, 239, 216, 0.36), transparent 28%),
+    linear-gradient(135deg, #a9c7a4 0%, #8fb394 54%, #b8caa8 100%);
+}
+
+.flags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.3;
+}
+
+.flag {
+  position: absolute;
+  width: 46px;
+  height: 38px;
+}
+
+.flag::before {
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 34px;
+  content: "";
+  border-radius: 999px;
+  background: #416d4b;
+}
+
+.flag::after {
+  position: absolute;
+  left: 10px;
+  top: 4px;
+  width: 28px;
+  height: 20px;
+  content: "";
+  background: #4b7c56;
+  clip-path: polygon(0 0, 100% 14%, 76% 50%, 100% 86%, 0 100%);
+}
+
+.header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  max-width: 1180px;
+  margin: 0 auto 28px;
+}
+
+.kicker,
+.subtitle {
+  margin: 0;
+  color: rgba(20, 53, 40, 0.72);
+}
+
+.kicker {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.header h1 {
+  margin: 4px 0 8px;
+  font-size: clamp(2.2rem, 5vw, 4.8rem);
+  line-height: 0.95;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 999px;
+  color: #173426;
+  background: rgba(238, 247, 234, 0.45);
+  backdrop-filter: blur(16px);
+  text-transform: capitalize;
+}
+
+.status span {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #c29f38;
+}
+
+.status[data-state="online"] span {
+  background: #276f42;
+}
+
+.status[data-state="offline"] span {
+  background: #8e3d36;
+}
+
+.grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.card {
+  min-height: 232px;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 8px;
+  background: rgba(239, 249, 233, 0.36);
+  box-shadow: 0 18px 48px rgba(43, 78, 51, 0.16);
+  backdrop-filter: blur(18px);
+}
+
+.cardTop,
+.peers,
+.pagination {
+  display: flex;
+  align-items: center;
+}
+
+.cardTop {
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(20, 53, 40, 0.76);
+  font-size: 0.82rem;
+}
+
+.media {
+  overflow: hidden;
+  max-width: 150px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card h2 {
+  margin: 18px 0 10px;
+  font-size: 1.2rem;
+  line-height: 1.2;
+}
+
+.fileId {
+  overflow-wrap: anywhere;
+  min-height: 42px;
+  margin: 0;
+  color: rgba(20, 53, 40, 0.62);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.tags,
+.peers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tags {
+  margin-top: 16px;
+}
+
+.tags span,
+.peers span {
+  min-height: 26px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.26);
+  color: #1f4a34;
+  font-size: 0.78rem;
+}
+
+.peers {
+  margin-top: 12px;
+}
+
+.empty {
+  position: relative;
+  z-index: 1;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px;
+  border-radius: 8px;
+  background: rgba(239, 249, 233, 0.4);
+  backdrop-filter: blur(16px);
+}
+
+.pagination {
+  position: relative;
+  z-index: 1;
+  justify-content: center;
+  gap: 14px;
+  margin: 30px auto 0;
+}
+
+.pagination button {
+  min-width: 104px;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 8px;
+  color: #143528;
+  background: rgba(239, 249, 233, 0.42);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+
+.pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.pagination span {
+  min-width: 104px;
+  text-align: center;
+}
+
+@media (max-width: 680px) {
+  .shell {
+    padding: 28px 14px;
+  }
+
+  .header {
+    flex-direction: column;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -15,7 +15,7 @@ import { startDtfServer } from "./server.js";
 
 const CLIENT_PEER_ID = "22222222222222222222222222222222";
 
-const serverRun = await startDtfServer({ host: "127.0.0.1", port: 0 });
+const serverRun = await startDtfServer({ host: "127.0.0.1", port: 0, httpHost: "127.0.0.1", httpPort: 0 });
 const client = dgram.createSocket("udp4");
 
 try {

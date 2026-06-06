@@ -103,3 +103,19 @@ Run the UDP smoke test with:
 ```sh
 npm run server:smoke
 ```
+
+## React Frontend
+
+Start the backend bridge:
+
+```sh
+npm run server
+```
+
+In another terminal, start the Vite frontend:
+
+```sh
+npm run dev
+```
+
+The frontend proxies `/api` and `/ws` to the Node bridge on port `8787`.
