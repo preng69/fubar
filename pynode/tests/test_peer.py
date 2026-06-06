@@ -8,14 +8,29 @@ from pathlib import Path
 from dtf.files import SharedFile
 from dtf.peer import (
     DEFAULT_MAX_RANGE_BYTES,
+    BackgroundPeerServer,
+    DiscoveredPeer,
     DTFPeer,
     RangeRequestError,
     datagram_payload_capacity,
     fit_files_response,
     iter_range_data,
+    remember_discovered_peer,
     validate_range_request,
 )
-from dtf.protocol import FILE_ID_LEN, HEADER_LEN, FileRecord, GetRange, Header, MessageType, RangeData, crc32, encode_payload
+from dtf.protocol import (
+    FILE_ID_LEN,
+    HEADER_LEN,
+    FileRecord,
+    GetRange,
+    Header,
+    HelloAck,
+    MessageType,
+    Packet,
+    RangeData,
+    crc32,
+    encode_payload,
+)
 
 
 class PeerRangeTest(unittest.TestCase):
@@ -86,6 +101,30 @@ class PeerRangeTest(unittest.TestCase):
 
         self.assertEqual(logs, ["TX HELLO 127.0.0.1:4747 request_id=1 session_id=2"])
 
+    def test_shared_files_can_be_replaced_safely(self) -> None:
+        peer: DTFPeer = DTFPeer(logger=lambda _line: None)
+        shared_file: SharedFile = SharedFile(
+            path=Path("/tmp/demo"),
+            file_id=b"a" * FILE_ID_LEN,
+            file_size=1,
+            chunk_size=4096,
+            name="demo",
+            media_type="application/octet-stream",
+            tags=(),
+        )
+
+        peer.set_shared_files([shared_file])
+
+        self.assertEqual(peer.get_shared_files(), [shared_file])
+
+    def test_background_server_initial_state_and_stop_are_safe(self) -> None:
+        peer: DTFPeer = DTFPeer(logger=lambda _line: None)
+        server: BackgroundPeerServer = BackgroundPeerServer(peer)
+
+        self.assertFalse(server.is_running)
+        server.stop()
+        self.assertFalse(server.is_running)
+
     def test_fit_files_response_keeps_payload_inside_datagram_limit(self) -> None:
         records: list[FileRecord] = [
             FileRecord(
@@ -104,6 +143,62 @@ class PeerRangeTest(unittest.TestCase):
         self.assertLessEqual(len(encode_payload(response)) + HEADER_LEN, 300)
         self.assertLess(len(response.records), len(records))
         self.assertEqual(response.total_matches, len(records))
+
+    def test_remember_discovered_peer_dedupes_by_advertised_port(self) -> None:
+        discovered: dict[tuple[str, int], DiscoveredPeer] = {}
+        packet: Packet = Packet(
+            header=Header(
+                message_type=MessageType.HELLO_ACK,
+                flags=0,
+                payload_len=0,
+                request_id=99,
+                session_id=1234,
+                sender_id=b"s" * 16,
+            ),
+            payload=b"",
+        )
+
+        remember_discovered_peer(
+            discovered,
+            packet,
+            HelloAck(listen_port=4747, name="alice"),
+            ("192.168.1.10", 55555),
+            request_id=99,
+        )
+        remember_discovered_peer(
+            discovered,
+            packet,
+            HelloAck(listen_port=4747, name="alice"),
+            ("192.168.1.10", 55556),
+            request_id=99,
+        )
+
+        self.assertEqual(list(discovered), [("192.168.1.10", 4747)])
+        self.assertEqual(discovered[("192.168.1.10", 4747)].name, "alice")
+
+    def test_remember_discovered_peer_ignores_unrelated_packet(self) -> None:
+        discovered: dict[tuple[str, int], DiscoveredPeer] = {}
+        packet: Packet = Packet(
+            header=Header(
+                message_type=MessageType.FIND_FILES,
+                flags=0,
+                payload_len=0,
+                request_id=100,
+                session_id=1234,
+                sender_id=b"s" * 16,
+            ),
+            payload=b"",
+        )
+
+        remember_discovered_peer(
+            discovered,
+            packet,
+            HelloAck(listen_port=4747, name="alice"),
+            ("192.168.1.10", 4747),
+            request_id=99,
+        )
+
+        self.assertEqual(discovered, {})
 
 
 if __name__ == "__main__":

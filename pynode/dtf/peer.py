@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import socket
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,6 +62,14 @@ class DiscoveredFile:
     address: Address
     session_id: int
     record: FileRecord
+
+
+@dataclass(frozen=True)
+class DiscoveredPeer:
+    address: Address
+    session_id: int
+    listen_port: int
+    name: str
 
 
 def datagram_payload_capacity(max_datagram: int) -> int:
@@ -145,6 +154,15 @@ class DTFPeer:
         self.cancelled_requests: set[int] = set()
         self.logger: Logger = logger or print
         self.max_range_bytes: int = max_range_bytes
+        self._shared_files_lock: threading.RLock = threading.RLock()
+
+    def set_shared_files(self, shared_files: Iterable[SharedFile]) -> None:
+        with self._shared_files_lock:
+            self.shared_files = list(shared_files)
+
+    def get_shared_files(self) -> list[SharedFile]:
+        with self._shared_files_lock:
+            return list(self.shared_files)
 
     def serve(self, host: str = "0.0.0.0") -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -186,6 +204,32 @@ class DTFPeer:
                 if responses:
                     break
         return responses
+
+    def discover_peers(
+        self,
+        targets: Iterable[Address],
+        timeout: float = 0.5,
+        attempts: int = 2,
+    ) -> list[DiscoveredPeer]:
+        request: Hello = Hello(listen_port=self.listen_port, name=self.name)
+        discovered: dict[Address, DiscoveredPeer] = {}
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.bind(("", 0))
+            for _ in range(attempts):
+                request_id: int = random_u64()
+                for target in targets:
+                    self._send(sock, target, MessageType.HELLO, request, request_id=request_id, session_id=0)
+                deadline: float = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    packet_message: tuple[Packet, PayloadMessage, Address] | None = self._recv_payload(sock, deadline)
+                    if packet_message is None:
+                        break
+                    packet, message, address = packet_message
+                    if packet.header.sender_id == self.peer_id:
+                        continue
+                    remember_discovered_peer(discovered, packet, message, address, request_id=request_id)
+        return sorted(discovered.values(), key=lambda peer: (peer.address[0], peer.address[1], peer.name))
 
     def hello(
         self,
@@ -308,7 +352,7 @@ class DTFPeer:
             )
             return
         total, records = match_files(
-            self.shared_files,
+            self.get_shared_files(),
             query_kind=message.query_kind,
             query=message.query,
             max_results=message.max_results,
@@ -334,7 +378,7 @@ class DTFPeer:
                 detail="unknown session",
             )
             return
-        shared_file: SharedFile | None = find_shared_file(self.shared_files, message.file_id)
+        shared_file: SharedFile | None = find_shared_file(self.get_shared_files(), message.file_id)
         if shared_file is None:
             self._send_error(
                 sock,
@@ -526,6 +570,56 @@ class DTFPeer:
         )
 
 
+class BackgroundPeerServer:
+    def __init__(self, peer: DTFPeer, host: str = "0.0.0.0") -> None:
+        self.peer: DTFPeer = peer
+        self.host: str = host
+        self._stop: threading.Event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._socket: socket.socket | None = None
+
+    @property
+    def is_running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self) -> None:
+        if self.is_running:
+            return
+        self._stop.clear()
+        sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((self.host, self.peer.listen_port))
+        sock.settimeout(0.2)
+        self._socket = sock
+        self._thread = threading.Thread(target=self._run, name="dtf-peer-server", daemon=True)
+        self._thread.start()
+        self.peer.logger(f"DTF peer listening on {self.host}:{self.peer.listen_port}")
+
+    def stop(self) -> None:
+        self._stop.set()
+        sock: socket.socket | None = self._socket
+        if sock is not None:
+            sock.close()
+        thread: threading.Thread | None = self._thread
+        if thread is not None:
+            thread.join(timeout=1.0)
+        self._socket = None
+        self._thread = None
+
+    def _run(self) -> None:
+        sock: socket.socket | None = self._socket
+        if sock is None:
+            return
+        while not self._stop.is_set():
+            try:
+                datagram, address = sock.recvfrom(65535)
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            self.peer.handle_datagram(sock, datagram, _address(address))
+
+
 def _address(value: tuple[str, int] | tuple[str, int, int, int]) -> Address:
     return value[0], value[1]
 
@@ -535,6 +629,28 @@ def parse_peer(value: str, default_port: int = DEFAULT_PORT) -> Address:
         return value, default_port
     host, raw_port = value.rsplit(":", 1)
     return host, int(raw_port)
+
+
+def remember_discovered_peer(
+    discovered: dict[Address, DiscoveredPeer],
+    packet: Packet,
+    message: PayloadMessage,
+    address: Address,
+    request_id: int,
+) -> None:
+    if packet.header.request_id != request_id:
+        return
+    if packet.header.message_type != MessageType.HELLO_ACK:
+        return
+    if not isinstance(message, HelloAck):
+        return
+    peer_address: Address = (address[0], message.listen_port or address[1])
+    discovered[peer_address] = DiscoveredPeer(
+        address=peer_address,
+        session_id=packet.header.session_id,
+        listen_port=message.listen_port,
+        name=message.name,
+    )
 
 
 def _sha256_path(path: Path) -> bytes:

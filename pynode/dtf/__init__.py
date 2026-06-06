@@ -1,5 +1,6 @@
 from .files import SharedFile, file_id_from_hex, index_paths
-from .peer import DTFPeer
+from .names import random_peer_name
+from .peer import DTFPeer, DiscoveredPeer
 from .protocol import (
     DEFAULT_PORT,
     ErrorCode,
@@ -17,6 +18,7 @@ from .protocol import (
 
 __all__: list[str] = [
     "DEFAULT_PORT",
+    "DiscoveredPeer",
     "DTFPeer",
     "ErrorCode",
     "FileRecord",
@@ -32,4 +34,5 @@ __all__: list[str] = [
     "SharedFile",
     "file_id_from_hex",
     "index_paths",
+    "random_peer_name",
 ]
