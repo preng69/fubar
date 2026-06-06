@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "npm --prefix tsnode run dev",
+    "app": "npm --prefix tsnode run app",
+    "app:build": "npm --prefix tsnode run app:build",
     "server": "npm --prefix tsnode run server",
     "build": "npm --prefix tsnode run build",
     "frontend:build": "npm --prefix tsnode run frontend:build",

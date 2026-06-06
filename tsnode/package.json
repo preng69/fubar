@@ -19,6 +19,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "vite --host 0.0.0.0",
+    "app:build": "npm run build && npm run frontend:build",
+    "app": "node server/clear-ports.js && npm run app:build && node server/server.js",
     "frontend:build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "prepare": "npm run build",

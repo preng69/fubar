@@ -1,7 +1,7 @@
 import dgram from "node:dgram";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,6 +12,7 @@ import { DTF_DEFAULT_PORT } from "../dist/types.js";
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_UPLOADS_DIR = path.join(packageRoot, "files", "uploads");
 const DEFAULT_DOWNLOADS_DIR = path.join(packageRoot, "files", "downloads");
+const DEFAULT_WEB_DIST_DIR = path.join(packageRoot, "web-dist");
 const DOWNLOAD_CLIENT_PEER_ID = "22222222222222222222222222222222";
 const DEFAULT_CHUNK_SIZE = 64 * 1024;
 const DEFAULT_HTTP_PORT = 8787;
@@ -78,7 +79,9 @@ export function createDtfServer(options = {}) {
     }
   });
 
-  const bridge = bridgeEnabled ? createBridge({ dataset, files: apiFiles, localPeer }) : undefined;
+  const bridge = bridgeEnabled
+    ? createBridge({ dataset, files: apiFiles, localPeer, webDistDir: options.webDistDir })
+    : undefined;
 
   return {
     socket,
@@ -235,8 +238,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 }
 
-function createBridge({ dataset, files, localPeer }) {
+function createBridge({ dataset, files, localPeer, webDistDir }) {
   const sockets = new Set();
+  const staticRoot = path.resolve(webDistDir ?? process.env.DTF_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
   const httpServer = http.createServer((request, response) => {
     response.setHeader("Access-Control-Allow-Origin", "*");
     response.setHeader("Access-Control-Allow-Headers", "content-type");
@@ -328,7 +332,7 @@ function createBridge({ dataset, files, localPeer }) {
       return;
     }
 
-    sendJson(response, 404, { error: "not-found" });
+    void serveStaticApp({ url, response, staticRoot });
   });
   const wsServer = new WebSocketServer({ server: httpServer, path: "/ws" });
 
@@ -360,6 +364,40 @@ function createBridge({ dataset, files, localPeer }) {
       }
     }
   };
+}
+
+async function serveStaticApp({ url, response, staticRoot }) {
+  if (!existsSync(staticRoot)) {
+    sendJson(response, 404, {
+      error: "frontend-not-built",
+      message: "Run npm run frontend:build before starting the app server."
+    });
+    return;
+  }
+
+  const requestedPath = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
+  const filePath = safeStaticPath(staticRoot, requestedPath);
+  const candidatePath = filePath && existsSync(filePath) ? filePath : path.join(staticRoot, "index.html");
+
+  try {
+    const bytes = await readFile(candidatePath);
+    response.writeHead(200, { "content-type": mediaTypeForPath(candidatePath) });
+    response.end(bytes);
+  } catch {
+    sendJson(response, 404, { error: "not-found" });
+  }
+}
+
+function safeStaticPath(staticRoot, requestPath) {
+  const cleanPath = requestPath.replace(/^\/+/, "");
+  const filePath = path.resolve(staticRoot, cleanPath);
+  const relative = path.relative(staticRoot, filePath);
+
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    return undefined;
+  }
+
+  return filePath;
 }
 
 async function handleDownloadRequest({ request, response, dataset }) {

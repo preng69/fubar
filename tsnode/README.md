@@ -128,7 +128,22 @@ npm run server:smoke
 
 ## React Frontend
 
-Start the backend bridge:
+For the simplest one-server setup, run:
+
+```sh
+npm run app
+```
+
+Then open:
+
+```text
+http://localhost:8787
+```
+
+This serves the React frontend, HTTP API, WebSocket bridge, and DTF UDP server
+from one Node process.
+
+During frontend development, you can still start the backend bridge:
 
 ```sh
 npm run server
