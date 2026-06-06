@@ -1,5 +1,5 @@
 import dgram from "node:dgram";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import http from "node:http";
@@ -12,7 +12,6 @@ import { DTF_DEFAULT_PORT } from "../dist/types.js";
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_UPLOADS_DIR = path.join(packageRoot, "files", "uploads");
 const DEFAULT_DOWNLOADS_DIR = path.join(packageRoot, "files", "downloads");
-const DEFAULT_PEER_ID = "11111111111111111111111111111111";
 const DOWNLOAD_CLIENT_PEER_ID = "22222222222222222222222222222222";
 const DEFAULT_CHUNK_SIZE = 64 * 1024;
 const DEFAULT_HTTP_PORT = 8787;
@@ -68,7 +67,7 @@ export function createDtfServer(options = {}) {
     transport,
     files,
     contents: dataset.contents,
-    sessionIdFactory: options.sessionIdFactory,
+    sessionIdFactory: options.sessionIdFactory ?? sessionIdFromUuid,
     maxRangeLength: options.maxRangeLength,
     defaultMaxDatagram: options.defaultMaxDatagram
   });
@@ -418,7 +417,7 @@ function sendJson(response, status, body) {
 function loadDatasetFromUploadsSync(options = {}) {
   const { uploadsDir, downloadsDir } = ensureDtfFoldersSync(options);
   const localPeer = {
-    peerId: normalizePeerId(options.peerId ?? process.env.DTF_PEER_ID ?? DEFAULT_PEER_ID),
+    peerId: normalizePeerId(options.peerId ?? process.env.DTF_PEER_ID ?? peerIdFromComputerName()),
     name: options.peerName ?? process.env.DTF_PEER_NAME ?? "DTF Folder Server",
     listenPort: options.listenPort
   };
@@ -639,6 +638,17 @@ function normalizePeerId(value) {
   }
 
   return normalized;
+}
+
+function peerIdFromComputerName() {
+  const computerName = process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? process.env.USERNAME ?? "dtf-peer";
+  return createHash("sha256").update(computerName).digest("hex").slice(0, 32);
+}
+
+function sessionIdFromUuid() {
+  const hex = randomUUID().replace(/-/g, "").slice(0, 16);
+  const sessionId = BigInt(`0x${hex}`);
+  return sessionId === 0n ? 1n : sessionId;
 }
 
 function positiveInt(value, fallback) {
