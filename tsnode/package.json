@@ -1,0 +1,28 @@
+{
+  "name": "@dtf/mock",
+  "version": "0.1.0",
+  "description": "Browser-friendly mock client for the draft DTF protocol.",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}
