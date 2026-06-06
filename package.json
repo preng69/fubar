@@ -1,0 +1,15 @@
+{
+  "name": "dtf-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix tsnode run dev",
+    "server": "npm --prefix tsnode run server",
+    "build": "npm --prefix tsnode run build",
+    "frontend:build": "npm --prefix tsnode run frontend:build",
+    "server:smoke": "npm --prefix tsnode run server:smoke",
+    "typecheck": "npm --prefix tsnode run typecheck",
+    "smoke": "npm --prefix tsnode run smoke",
+    "install:tsnode": "npm --prefix tsnode install"
+  }
+}

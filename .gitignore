@@ -5,4 +5,5 @@ tsnode/dist/
 tsnode/node_modules/
 __pycache__/
 *.pyc
+pynode/shared/
 .DS_Store
