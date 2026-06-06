@@ -137,6 +137,74 @@
   margin: 0 auto;
 }
 
+.content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(220px, 25%) 1fr;
+  gap: 20px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.localPanel,
+.remotePanel {
+  min-width: 0;
+}
+
+.localPanel {
+  align-self: start;
+  min-height: 420px;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(239, 249, 233, 0.18);
+  box-shadow: 0 18px 48px rgba(43, 78, 51, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+.remotePanel .grid {
+  max-width: none;
+  margin: 0;
+}
+
+.panelHeader {
+  margin-bottom: 14px;
+}
+
+.panelHeader h2 {
+  margin: 2px 0 0;
+  font-size: 1.25rem;
+}
+
+.panelNote {
+  margin: 0;
+  color: rgba(20, 53, 40, 0.7);
+  line-height: 1.45;
+}
+
+.fileList {
+  display: grid;
+  gap: 8px;
+  max-height: calc(100vh - 260px);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.fileList li {
+  overflow: hidden;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #143528;
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .card {
   min-height: 232px;
   padding: 18px;
@@ -260,5 +328,13 @@
 
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .content {
+    grid-template-columns: 1fr;
+  }
+
+  .localPanel {
+    min-height: auto;
   }
 }

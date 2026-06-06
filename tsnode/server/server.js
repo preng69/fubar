@@ -275,6 +275,22 @@ function createBridge({ dataset, files, localPeer }) {
       return;
     }
 
+    if (url.pathname === "/api/uploads") {
+      sendJson(response, 200, {
+        uploadsDir: dataset.uploadsDir,
+        records: collectUploadFilesSync(dataset.uploadsDir).map((filePath) => ({
+          name: path.relative(dataset.uploadsDir, filePath).split(path.sep).join("/"),
+          path: filePath
+        }))
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/discover") {
+      void handleDiscoverRequest({ url, response, localPeer });
+      return;
+    }
+
     if (url.pathname === "/api/files") {
       const page = positiveInt(url.searchParams.get("page"), 1);
       const pageSize = Math.min(positiveInt(url.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
@@ -335,6 +351,63 @@ function createBridge({ dataset, files, localPeer }) {
       }
     }
   };
+}
+
+async function handleDiscoverRequest({ url, response, localPeer }) {
+  const page = positiveInt(url.searchParams.get("page"), 1);
+  const pageSize = Math.min(positiveInt(url.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
+  const target = parseAddress(url.searchParams.get("address") ?? "255.255.255.255:4747");
+  const socket = dgram.createSocket("udp4");
+  const transport = createUdpClientTransport(socket);
+  const client = createDtfClient({
+    localPeer: {
+      peerId: DOWNLOAD_CLIENT_PEER_ID,
+      name: "DTF Web Discovery",
+      listenPort: 0
+    },
+    transport,
+    discoveryAddresses: [target],
+    addressEquals,
+    discoveryResponseTimeoutMs: positiveInt(url.searchParams.get("timeoutMs"), 500),
+    acceptDiscoveryResponse() {
+      return true;
+    }
+  });
+
+  try {
+    await bindUdpClient(socket);
+    socket.setBroadcast(true);
+
+    const discovered = await client.findAvailableFiles({
+      queryKind: "all",
+      maxResults: 200
+    });
+    const records = discovered.records
+      .map((record) => ({
+        ...record,
+        peers: record.peers.filter((peer) => peer.peerId !== localPeer.peerId)
+      }))
+      .filter((record) => record.peers.length > 0);
+    const pageCount = Math.max(1, Math.ceil(records.length / pageSize));
+    const currentPage = Math.min(page, pageCount);
+    const start = (currentPage - 1) * pageSize;
+
+    sendJson(response, 200, {
+      page: currentPage,
+      pageSize,
+      pageCount,
+      total: records.length,
+      records: records.slice(start, start + pageSize)
+    });
+  } catch (error) {
+    sendJson(response, 502, {
+      error: "discovery-failed",
+      message: error instanceof Error ? error.message : "Discovery failed"
+    });
+  } finally {
+    client.dispose();
+    socket.close();
+  }
 }
 
 function sendJson(response, status, body) {

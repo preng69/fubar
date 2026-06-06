@@ -5,8 +5,18 @@ export async function fetchFiles(page) {
   return readJson(response);
 }
 
+export async function fetchDiscoveredFiles(page) {
+  const response = await fetch(`/api/discover?page=${page}&pageSize=${PAGE_SIZE}`);
+  return readJson(response);
+}
+
 export async function fetchHealth() {
   const response = await fetch("/api/health");
+  return readJson(response);
+}
+
+export async function fetchUploads() {
+  const response = await fetch("/api/uploads");
   return readJson(response);
 }
 
