@@ -77,8 +77,8 @@ npm run smoke
 ## UDP Backend Server
 
 The package also includes a JavaScript Node.js UDP server for the draft DTF
-protocol. It uses the compiled TypeScript mock dataset from `dist`, so build
-before running:
+protocol. It wraps the compiled TypeScript DTF implementation from `dist`, so
+build before running:
 
 ```sh
 npm run server

@@ -1,16 +1,16 @@
 import dgram from "node:dgram";
 import assert from "node:assert/strict";
 import {
+  createDtfPacket,
+  decodeDtfPacket,
+  encodeDtfPacket
+} from "../dist/codec.js";
+import { randomRequestId } from "../dist/ids.js";
+import {
   DTF_DEFAULT_MAX_DATAGRAM,
-  MessageType,
-  QueryKind,
-  createRequestId,
-  decodeDatagram,
-  decodeFiles,
-  decodeRangeData,
-  decodeRangeDone,
-  encodeDatagram
-} from "./protocol.js";
+  DtfMessageType,
+  DtfQueryKindCode
+} from "../dist/types.js";
 import { startDtfServer } from "./server.js";
 
 const CLIENT_PEER_ID = "22222222222222222222222222222222";
@@ -23,43 +23,53 @@ try {
   const target = serverRun.address;
 
   const filesResponse = await roundTrip(client, target, {
-    type: MessageType.FIND_FILES,
-    payload: Buffer.concat([Buffer.from([QueryKind.all]), u16(10), u16(0)])
+    type: DtfMessageType.FindFiles,
+    payload: {
+      queryKind: DtfQueryKindCode.All,
+      maxResults: 10,
+      query: ""
+    }
   });
-  assert.equal(filesResponse.type, MessageType.FILES);
-  const files = decodeFiles(filesResponse.payload);
-  assert.equal(files.records.length, 3);
+  assert.equal(filesResponse.type, DtfMessageType.Files);
+  assert.equal(filesResponse.payload.records.length, 3);
 
   const helloResponse = await roundTrip(client, target, {
-    type: MessageType.HELLO,
-    payload: Buffer.concat([u16(client.address().port), stringBytes("Smoke Client")])
+    type: DtfMessageType.Hello,
+    payload: {
+      listenPort: client.address().port,
+      name: "Smoke Client"
+    }
   });
-  assert.equal(helloResponse.type, MessageType.HELLO_ACK);
+  assert.equal(helloResponse.type, DtfMessageType.HelloAck);
   assert.notEqual(helloResponse.sessionId, 0n);
 
-  const firstFile = files.records[0];
-  const rangeRequestId = createRequestId();
-  const rangeRequest = encodeDatagram({
-    type: MessageType.GET_RANGE,
-    requestId: rangeRequestId,
-    sessionId: helloResponse.sessionId,
-    senderId: CLIENT_PEER_ID,
-    payload: Buffer.concat([
-      Buffer.from(firstFile.fileId, "hex"),
-      u64(0),
-      u64(128),
-      u16(DTF_DEFAULT_MAX_DATAGRAM)
-    ])
-  });
+  const firstFile = filesResponse.payload.records[0];
+  const rangeRequestId = randomRequestId();
+  const rangeRequest = encodeDtfPacket(
+    createDtfPacket(
+      {
+        type: DtfMessageType.GetRange,
+        requestId: rangeRequestId,
+        sessionId: helloResponse.sessionId,
+        senderId: CLIENT_PEER_ID
+      },
+      {
+        fileId: firstFile.fileId,
+        fromOffset: 0n,
+        toOffset: 128n,
+        maxDatagram: DTF_DEFAULT_MAX_DATAGRAM
+      }
+    )
+  );
 
   client.send(rangeRequest, target.port, target.address);
   const rangeMessages = await collectRange(client, rangeRequestId);
-  const dataMessage = rangeMessages.find((message) => message.type === MessageType.RANGE_DATA);
-  const doneMessage = rangeMessages.find((message) => message.type === MessageType.RANGE_DONE);
+  const dataMessage = rangeMessages.find((message) => message.type === DtfMessageType.RangeData);
+  const doneMessage = rangeMessages.find((message) => message.type === DtfMessageType.RangeDone);
   assert.ok(dataMessage);
   assert.ok(doneMessage);
-  assert.equal(decodeRangeData(dataMessage.payload).data.byteLength, 128);
-  assert.equal(decodeRangeDone(doneMessage.payload).sentBytes, 128);
+  assert.equal(dataMessage.payload.data.byteLength, 128);
+  assert.equal(doneMessage.payload.sentBytes, 128n);
 
   console.log("DTF UDP server smoke test passed");
 } finally {
@@ -72,13 +82,18 @@ function bind(socket) {
 }
 
 function roundTrip(socket, target, { type, payload }) {
-  const requestId = createRequestId();
-  const packet = encodeDatagram({
-    type,
-    requestId,
-    senderId: CLIENT_PEER_ID,
-    payload
-  });
+  const requestId = randomRequestId();
+  const packet = encodeDtfPacket(
+    createDtfPacket(
+      {
+        type,
+        requestId,
+        sessionId: 0n,
+        senderId: CLIENT_PEER_ID
+      },
+      payload
+    )
+  );
 
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -87,7 +102,7 @@ function roundTrip(socket, target, { type, payload }) {
     }, 1000);
 
     function onMessage(datagram) {
-      const message = decodeDatagram(datagram);
+      const message = decodeDtfPacket(datagram);
       if (!message || message.requestId !== requestId) {
         return;
       }
@@ -112,14 +127,14 @@ function collectRange(socket, requestId) {
     }, 1000);
 
     function onMessage(datagram) {
-      const message = decodeDatagram(datagram);
+      const message = decodeDtfPacket(datagram);
       if (!message || message.requestId !== requestId) {
         return;
       }
 
       messages.push(message);
 
-      if (message.type === MessageType.RANGE_DONE) {
+      if (message.type === DtfMessageType.RangeDone) {
         clearTimeout(timeout);
         socket.off("message", onMessage);
         resolve(messages);
@@ -128,21 +143,4 @@ function collectRange(socket, requestId) {
 
     socket.on("message", onMessage);
   });
-}
-
-function stringBytes(value) {
-  const bytes = Buffer.from(new TextEncoder().encode(value));
-  return Buffer.concat([u16(bytes.byteLength), bytes]);
-}
-
-function u16(value) {
-  const buffer = Buffer.alloc(2);
-  buffer.writeUInt16BE(value);
-  return buffer;
-}
-
-function u64(value) {
-  const buffer = Buffer.alloc(8);
-  buffer.writeBigUInt64BE(BigInt(value));
-  return buffer;
 }
