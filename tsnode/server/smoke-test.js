@@ -1,5 +1,8 @@
 import dgram from "node:dgram";
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   createDtfPacket,
   decodeDtfPacket,
@@ -11,11 +14,27 @@ import {
   DtfMessageType,
   DtfQueryKindCode
 } from "../dist/types.js";
-import { startDtfServer } from "./server.js";
+import { downloadFromDtfServer, startDtfServer } from "./server.js";
 
 const CLIENT_PEER_ID = "22222222222222222222222222222222";
+const tempRoot = await mkdtemp(path.join(os.tmpdir(), "dtf-folders-"));
+const uploadsDir = path.join(tempRoot, "uploads");
+const downloadsDir = path.join(tempRoot, "downloads");
+const firstUploadBytes = new TextEncoder().encode("Folder-backed DTF smoke upload.\n".repeat(8));
 
-const serverRun = await startDtfServer({ host: "127.0.0.1", port: 0, httpHost: "127.0.0.1", httpPort: 0 });
+await mkdir(uploadsDir, { recursive: true });
+await mkdir(path.join(uploadsDir, "docs"), { recursive: true });
+await writeFile(path.join(uploadsDir, "docs", "folder-handbook.txt"), firstUploadBytes);
+await writeFile(path.join(uploadsDir, "tiny-index.json"), new TextEncoder().encode('{"from":"uploads"}\n'));
+
+const serverRun = await startDtfServer({
+  host: "127.0.0.1",
+  port: 0,
+  httpHost: "127.0.0.1",
+  httpPort: 0,
+  uploadsDir,
+  downloadsDir
+});
 const client = dgram.createSocket("udp4");
 
 try {
@@ -31,7 +50,7 @@ try {
     }
   });
   assert.equal(filesResponse.type, DtfMessageType.Files);
-  assert.equal(filesResponse.payload.records.length, 3);
+  assert.equal(filesResponse.payload.records.length, 2);
 
   const helloResponse = await roundTrip(client, target, {
     type: DtfMessageType.Hello,
@@ -44,7 +63,9 @@ try {
   assert.notEqual(helloResponse.sessionId, 0n);
 
   const firstFile = filesResponse.payload.records[0];
+  assert.equal(firstFile.name, "docs/folder-handbook.txt");
   const rangeRequestId = randomRequestId();
+  const rangeLength = BigInt(firstUploadBytes.byteLength);
   const rangeRequest = encodeDtfPacket(
     createDtfPacket(
       {
@@ -56,7 +77,7 @@ try {
       {
         fileId: firstFile.fileId,
         fromOffset: 0n,
-        toOffset: 128n,
+        toOffset: rangeLength,
         maxDatagram: DTF_DEFAULT_MAX_DATAGRAM
       }
     )
@@ -68,17 +89,39 @@ try {
   const doneMessage = rangeMessages.find((message) => message.type === DtfMessageType.RangeDone);
   assert.ok(dataMessage);
   assert.ok(doneMessage);
-  assert.equal(dataMessage.payload.data.byteLength, 128);
-  assert.equal(doneMessage.payload.sentBytes, 128n);
+  assert.equal(dataMessage.payload.data.byteLength, firstUploadBytes.byteLength);
+  assert.equal(doneMessage.payload.sentBytes, rangeLength);
+
+  const downloadResult = await downloadFromDtfServer({
+    address: `${target.address}:${target.port}`,
+    query: "folder-handbook",
+    downloadsDir
+  });
+  assert.equal(downloadResult.downloads.length, 1);
+  assert.deepEqual(await readFile(downloadResult.downloads[0].path), Buffer.from(firstUploadBytes));
 
   console.log("DTF UDP server smoke test passed");
 } finally {
   client.close();
   await serverRun.server.close();
+  await rm(tempRoot, { recursive: true, force: true });
 }
 
 function bind(socket) {
-  return new Promise((resolve) => socket.bind(0, "127.0.0.1", resolve));
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      socket.off("listening", onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      socket.off("error", onError);
+      resolve();
+    };
+
+    socket.once("error", onError);
+    socket.once("listening", onListening);
+    socket.bind(0, "127.0.0.1");
+  });
 }
 
 function roundTrip(socket, target, { type, payload }) {

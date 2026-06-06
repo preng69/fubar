@@ -23,6 +23,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "prepare": "npm run build",
     "server": "npm run build && node server/server.js",
+    "download": "npm run build && node server/server.js download",
     "server:smoke": "npm run build && node server/smoke-test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke": "node scripts/smoke-test.mjs"

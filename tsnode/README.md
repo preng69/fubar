@@ -84,19 +84,41 @@ build before running:
 npm run server
 ```
 
+The Node server uses two local folders:
+
+- `files/uploads/` contains files this peer advertises and serves to other clients.
+- `files/downloads/` receives files downloaded by the Node download helper.
+
+Both folders are created automatically. Dotfiles are ignored when scanning
+uploads, so the checked-in `.gitkeep` marker is not advertised.
+
 By default the server listens on UDP `0.0.0.0:4747`, which makes it reachable
 from other machines on the same local WiFi using this computer's LAN IP address.
-You can override the bind address, port, and displayed peer name:
+You can override the bind address, port, displayed peer name, and folders:
 
 ```sh
 $env:DTF_HOST = "0.0.0.0"
 $env:DTF_PORT = "4747"
 $env:DTF_PEER_NAME = "Living Room Server"
+$env:DTF_UPLOADS_DIR = "C:\Users\you\DTF\uploads"
+$env:DTF_DOWNLOADS_DIR = "C:\Users\you\DTF\downloads"
 npm run server
 ```
 
 On Windows, allow Node.js or UDP port `4747` through the firewall if another
 machine cannot reach the server.
+
+Download the first matching file from a peer into `files/downloads/` with:
+
+```sh
+npm run download -- 127.0.0.1:4747 handbook
+```
+
+Add `--all` to download every matching file:
+
+```sh
+npm run download -- 127.0.0.1:4747 handbook --all
+```
 
 Run the UDP smoke test with:
 

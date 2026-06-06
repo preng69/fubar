@@ -1,3 +1,8 @@
 dist/
 web-dist/
 node_modules/
+files/.DS_Store
+files/uploads/*
+files/downloads/*
+!files/uploads/.gitkeep
+!files/downloads/.gitkeep
