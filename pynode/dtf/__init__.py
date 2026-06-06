@@ -15,6 +15,7 @@ from .protocol import (
     RangeData,
     RangeDone,
 )
+from .swarm import SwarmDownloadResult, SwarmSource, download_swarm, find_swarm_sources
 
 __all__: list[str] = [
     "DEFAULT_PORT",
@@ -32,7 +33,11 @@ __all__: list[str] = [
     "RangeData",
     "RangeDone",
     "SharedFile",
+    "SwarmDownloadResult",
+    "SwarmSource",
+    "download_swarm",
     "file_id_from_hex",
+    "find_swarm_sources",
     "index_paths",
     "random_peer_name",
 ]

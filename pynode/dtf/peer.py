@@ -328,16 +328,41 @@ class DTFPeer:
         if digest != record_file_id:
             raise ValueError("downloaded file SHA-256 does not match file ID")
 
+    def download_range(
+        self,
+        peer: Address,
+        file_id: bytes,
+        start: int,
+        end: int,
+        max_datagram: int = DEFAULT_MAX_DATAGRAM,
+        timeout: float = 1.0,
+        attempts: int = 4,
+    ) -> bytes:
+        session_id: int = self.hello(peer)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.bind(("", 0))
+            return self._download_range(
+                sock=sock,
+                peer=peer,
+                session_id=session_id,
+                file_id=file_id,
+                start=start,
+                end=end,
+                max_datagram=max_datagram,
+                timeout=timeout,
+                attempts=attempts,
+            )
+
     def handle_datagram(self, sock: socket.socket, datagram: bytes, address: Address) -> None:
         packet: Packet | None = decode_datagram(datagram)
         if packet is None:
             self.logger(f"RX INVALID {address[0]}:{address[1]}")
             return
-        self._log("RX", packet.header, address)
         message: PayloadMessage | None
         try:
             message = decode_payload(packet.header.message_type, packet.payload)
         except MalformedMessage as exc:
+            self._log("RX", packet.header, address)
             self._send_error(
                 sock,
                 address,
@@ -348,7 +373,9 @@ class DTFPeer:
             )
             return
         if message is None:
+            self._log("RX", packet.header, address)
             return
+        self._log("RX", packet.header, address, _message_log_detail(message))
         if isinstance(message, Hello):
             self._handle_hello(sock, packet, message, address)
         elif isinstance(message, FindFiles):
@@ -541,13 +568,15 @@ class DTFPeer:
         if packet is None:
             self.logger(f"RX INVALID {address[0]}:{address[1]}")
             return None
-        self._log("RX", packet.header, address)
         try:
             message: PayloadMessage | None = decode_payload(packet.header.message_type, packet.payload)
         except MalformedMessage:
+            self._log("RX", packet.header, address)
             return None
         if message is None:
+            self._log("RX", packet.header, address)
             return None
+        self._log("RX", packet.header, address, _message_log_detail(message))
         return packet, message, address
 
     def _send(
@@ -575,7 +604,7 @@ class DTFPeer:
             session_id=session_id,
             sender_id=self.peer_id,
         )
-        self._log("TX", header, address)
+        self._log("TX", header, address, _message_log_detail(message))
 
     def _send_error(
         self,
@@ -595,11 +624,13 @@ class DTFPeer:
             session_id=session_id,
         )
 
-    def _log(self, direction: str, header: Header, address: Address) -> None:
+    def _log(self, direction: str, header: Header, address: Address, detail: str = "") -> None:
+        detail_suffix: str = f" {detail}" if detail else ""
         self.logger(
             f"{direction} {message_type_name(header.message_type)} "
             f"{address[0]}:{address[1]} "
-            f"request_id={header.request_id} session_id={header.session_id}"
+            f"request_id={_short_id(header.request_id)} session_id={_short_id(header.session_id)}"
+            f"{detail_suffix}"
         )
 
 
@@ -662,6 +693,20 @@ def parse_peer(value: str, default_port: int = DEFAULT_PORT) -> Address:
         return value, default_port
     host, raw_port = value.rsplit(":", 1)
     return host, int(raw_port)
+
+
+def _short_id(value: int | bytes) -> str:
+    if isinstance(value, bytes):
+        encoded: str = value.hex()
+    else:
+        encoded = str(value)
+    return f"..{encoded[-4:]}"
+
+
+def _message_log_detail(message: PayloadMessage) -> str:
+    if isinstance(message, GetRange):
+        return f"range={message.from_offset}:{message.to_offset} file_id={_short_id(message.file_id)}"
+    return ""
 
 
 def remember_discovered_peer(
