@@ -237,9 +237,33 @@
 }
 
 .card h2 {
-  margin: 18px 0 10px;
+  margin: 0;
   font-size: 1.2rem;
   line-height: 1.2;
+}
+
+.fileTitle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: start;
+  margin: 18px 0 10px;
+}
+
+.fileTitle button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 8px;
+  color: #143528;
+  background: rgba(239, 249, 233, 0.46);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+
+.fileTitle button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .fileId {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchDiscoveredFiles, fetchHealth, fetchUploads } from "./api.js";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { downloadDiscoveredFile, fetchDiscoveredFiles, fetchHealth, fetchUploads } from "./api.js";
 import styles from "./App.module.css";
 
 const flagPositions = Array.from({ length: 22 }, (_, index) => ({
@@ -13,6 +13,7 @@ const flagPositions = Array.from({ length: 22 }, (_, index) => ({
 export default function App() {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState("connecting");
+  const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
   const uploads = useQuery({ queryKey: ["uploads"], queryFn: fetchUploads });
   const discoveredFiles = useQuery({
@@ -31,6 +32,12 @@ export default function App() {
 
     return total ? `${total} files` : "DTF bridge";
   }, [health.data, total]);
+  const download = useMutation({
+    mutationFn: downloadDiscoveredFile,
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: ["uploads"] });
+    }
+  });
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -117,7 +124,16 @@ export default function App() {
                     <span className={styles.media}>{file.mediaType || "application/octet-stream"}</span>
                     <span>{formatBytes(file.fileSize)}</span>
                   </div>
-                  <h2>{file.name}</h2>
+                  <div className={styles.fileTitle}>
+                    <h2>{file.name}</h2>
+                    <button
+                      type="button"
+                      onClick={() => download.mutate(file)}
+                      disabled={download.isPending}
+                    >
+                      Download
+                    </button>
+                  </div>
                   <p className={styles.fileId}>{file.fileId}</p>
                   <div className={styles.tags}>
                     {file.tags.map((tag) => (

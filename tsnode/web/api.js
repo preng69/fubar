@@ -20,6 +20,17 @@ export async function fetchUploads() {
   return readJson(response);
 }
 
+export async function downloadDiscoveredFile(file) {
+  const response = await fetch("/api/download", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ file })
+  });
+  return readJson(response);
+}
+
 async function readJson(response) {
   const body = await response.json();
 

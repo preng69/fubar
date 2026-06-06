@@ -247,12 +247,22 @@ function createBridge({ dataset, files, localPeer }) {
       return;
     }
 
-    if (!request.url || request.method !== "GET") {
+    if (!request.url) {
       sendJson(response, 405, { error: "method-not-allowed" });
       return;
     }
 
     const url = new URL(request.url, "http://localhost");
+
+    if (url.pathname === "/api/download" && request.method === "POST") {
+      void handleDownloadRequest({ request, response, dataset });
+      return;
+    }
+
+    if (request.method !== "GET") {
+      sendJson(response, 405, { error: "method-not-allowed" });
+      return;
+    }
 
     if (url.pathname === "/api/health") {
       sendJson(response, 200, {
@@ -350,6 +360,76 @@ function createBridge({ dataset, files, localPeer }) {
       }
     }
   };
+}
+
+async function handleDownloadRequest({ request, response, dataset }) {
+  try {
+    const body = await readJsonBody(request);
+    const record = body.file;
+
+    if (!record?.fileId || !Array.isArray(record.peers) || record.peers.length === 0) {
+      sendJson(response, 400, { error: "invalid-file-record" });
+      return;
+    }
+
+    const socket = dgram.createSocket("udp4");
+    const transport = createUdpClientTransport(socket);
+    const client = createDtfClient({
+      localPeer: {
+        peerId: DOWNLOAD_CLIENT_PEER_ID,
+        name: "DTF Web Downloader",
+        listenPort: 0
+      },
+      transport,
+      discoveryAddresses: record.peers.map((peer) => peer.address).filter(Boolean),
+      addressEquals,
+      acceptDiscoveryResponse() {
+        return true;
+      }
+    });
+
+    try {
+      await bindUdpClient(socket);
+      socket.setBroadcast(true);
+
+      const bytes = await client.downloadFile(record, {
+        verifyIntegrity: true
+      });
+      const path = await saveDownloadedFile(record, bytes, { downloadsDir: dataset.uploadsDir });
+
+      sendJson(response, 200, {
+        ok: true,
+        fileId: record.fileId,
+        name: record.name,
+        bytes: bytes.byteLength,
+        path
+      });
+    } finally {
+      client.dispose();
+      socket.close();
+    }
+  } catch (error) {
+    sendJson(response, 502, {
+      error: "download-failed",
+      message: error instanceof Error ? error.message : "Download failed"
+    });
+  }
+}
+
+function readJsonBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("error", reject);
+    request.on("end", () => {
+      try {
+        const text = Buffer.concat(chunks).toString("utf8");
+        resolve(text ? JSON.parse(text) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 }
 
 async function handleDiscoverRequest({ url, response, localPeer }) {
