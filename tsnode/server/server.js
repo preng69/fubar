@@ -192,12 +192,15 @@ export async function downloadFromDtfServer(options = {}) {
     const downloads = [];
 
     for (const record of records) {
+      const startedAt = performance.now();
       const bytes = await client.downloadFile(record, {
         maxParallelRequests: options.maxParallelRequests,
         verifyIntegrity: options.verifyIntegrity ?? true
       });
+      const elapsedMs = performance.now() - startedAt;
+      const speedBytesPerSecond = downloadSpeedBytesPerSecond(bytes.byteLength, elapsedMs);
       const path = await saveDownloadedFile(record, bytes, { downloadsDir: options.downloadsDir });
-      downloads.push({ record, path, bytes });
+      downloads.push({ record, path, bytes, elapsedMs, speedBytesPerSecond });
     }
 
     return { target, available, downloads };
@@ -218,7 +221,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
 
     for (const download of result.downloads) {
-      console.log(`Downloaded ${download.record.name} (${download.bytes.byteLength} bytes) to ${download.path}`);
+      console.log(
+        `Downloaded ${download.record.name} (${download.bytes.byteLength} bytes) to ${download.path} ` +
+          `at ${formatDownloadSpeed(download.speedBytesPerSecond)}`
+      );
     }
   } else {
     const { server, address } = await startDtfServer();
@@ -427,6 +433,7 @@ async function handleDownloadRequest({ request, response, dataset, logger }) {
       logger.write(`Downloading ${record.name}...`);
 
       const chunksByPeer = new Map();
+      const startedAt = performance.now();
       const bytes = await client.downloadFile(record, {
         verifyIntegrity: true,
         onProgress(progress) {
@@ -446,11 +453,16 @@ async function handleDownloadRequest({ request, response, dataset, logger }) {
           });
         }
       });
+      const elapsedMs = performance.now() - startedAt;
+      const speedBytesPerSecond = downloadSpeedBytesPerSecond(bytes.byteLength, elapsedMs);
       const path = await saveCompletedUpload(record, bytes, {
         downloadsDir: dataset.downloadsDir,
         uploadsDir: dataset.uploadsDir
       });
-      logger.write(`Downloaded ${record.name} (${bytes.byteLength} bytes) to ${path}`);
+      logger.write(
+        `Downloaded ${record.name} (${bytes.byteLength} bytes) to ${path} ` +
+          `at ${formatDownloadSpeed(speedBytesPerSecond)}`
+      );
       if (record.peers.length > 1 && chunksByPeer.size > 0) {
         const summary = [...chunksByPeer.values()]
           .map((peer) => `${peer.name} ${peer.chunks} chunk${peer.chunks === 1 ? "" : "s"}`)
@@ -463,6 +475,7 @@ async function handleDownloadRequest({ request, response, dataset, logger }) {
         fileId: record.fileId,
         name: record.name,
         bytes: bytes.byteLength,
+        speedBytesPerSecond,
         path
       });
     } finally {
@@ -959,6 +972,31 @@ function randomChoice(values) {
 function positiveInt(value, fallback) {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function downloadSpeedBytesPerSecond(bytes, elapsedMs) {
+  if (bytes <= 0 || elapsedMs <= 0) {
+    return 0;
+  }
+
+  return bytes / (elapsedMs / 1000);
+}
+
+function formatDownloadSpeed(bytesPerSecond) {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) {
+    return "0 B/s";
+  }
+
+  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+  let value = bytesPerSecond;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function createServerLogger() {
