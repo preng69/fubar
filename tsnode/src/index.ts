@@ -1,5 +1,6 @@
 export { createDtfClient, DtfClient } from "./client.js";
 export { createDtfFileServer, DtfFileServer } from "./server.js";
+export { createDtfProtocolResponder, DtfProtocolResponder } from "./protocol-responder.js";
 export { mockDtfDataset } from "./mock-data.js";
 export type {
   DtfAvailableFile,

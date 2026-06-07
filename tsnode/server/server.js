@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
 import { decodeDtfPacket } from "../dist/codec.js";
-import { createDtfClient, createDtfFileServer } from "../dist/index.js";
+import { createDtfClient, createDtfProtocolResponder } from "../dist/index.js";
 import { DTF_DEFAULT_PORT, DtfMessageType } from "../dist/types.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,7 +67,7 @@ export function createDtfServer(options = {}) {
       return () => subscribers.delete(handler);
     }
   };
-  const fileServer = createDtfFileServer({
+  const dtf = createDtfProtocolResponder({
     localPeer,
     transport,
     files,
@@ -91,7 +91,7 @@ export function createDtfServer(options = {}) {
 
   return {
     socket,
-    fileServer,
+    dtf,
     httpServer: bridge?.httpServer,
     wsServer: bridge?.wsServer,
     uploadsDir: dataset.uploadsDir,
@@ -150,7 +150,7 @@ export function createDtfServer(options = {}) {
       });
     },
     close() {
-      fileServer.dispose();
+      dtf.dispose();
       return new Promise((resolve) => {
         bridge?.wsServer.close();
         const closeUdp = () => socket.close(resolve);

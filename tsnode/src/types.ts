@@ -259,15 +259,7 @@ export interface DtfProtocolResponderOptions<TAddress = unknown> {
   defaultMaxDatagram?: number;
 }
 
-export interface DtfFileServerOptions<TAddress = unknown> {
-  localPeer: DtfPeer;
-  transport: DtfDatagramTransport<TAddress>;
-  files: Array<Omit<DtfFileRecord, "peers">>;
-  contents: Record<HexFileId, Uint8Array> | Map<HexFileId, Uint8Array>;
-  sessionIdFactory?: () => bigint;
-  maxRangeLength?: number;
-  defaultMaxDatagram?: number;
-}
+export interface DtfFileServerOptions<TAddress = unknown> extends DtfProtocolResponderOptions<TAddress> {}
 
 export interface DtfHelloOptions {
   name?: string;
