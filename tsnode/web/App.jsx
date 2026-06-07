@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { downloadDiscoveredFile, fetchDiscoveredFiles, fetchHealth, fetchLogs, fetchUploads } from "./api.js";
+import { downloadDiscoveredFile, fetchDiscoveredFiles, fetchHealth, fetchUploads } from "./api.js";
 import styles from "./App.module.css";
 
 const flagPositions = Array.from({ length: 22 }, (_, index) => ({
@@ -14,10 +14,8 @@ export default function App() {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState("connecting");
   const queryClient = useQueryClient();
-  const [logs, setLogs] = useState([]);
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
   const uploads = useQuery({ queryKey: ["uploads"], queryFn: fetchUploads });
-  const serverLogs = useQuery({ queryKey: ["logs"], queryFn: fetchLogs });
   const discoveredFiles = useQuery({
     queryKey: ["discovered-files", page],
     queryFn: () => fetchDiscoveredFiles(page),
@@ -45,12 +43,6 @@ export default function App() {
   const activeDownloadId = download.variables?.fileId;
 
   useEffect(() => {
-    if (serverLogs.data?.records) {
-      setLogs(serverLogs.data.records);
-    }
-  }, [serverLogs.data]);
-
-  useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
     socket.addEventListener("open", () => setStatus("online"));
@@ -59,10 +51,6 @@ export default function App() {
         const message = JSON.parse(event.data);
         if (message.type === "server-status") {
           setStatus(message.status);
-        } else if (message.type === "logs") {
-          setLogs(message.records);
-        } else if (message.type === "log") {
-          setLogs((current) => [...current.slice(-199), message.entry]);
         }
       } catch {
         setStatus("online");
@@ -191,25 +179,6 @@ export default function App() {
               Next
             </button>
           </nav>
-
-          <section className={styles.logPanel} aria-label="DTF logs">
-            <div className={styles.panelHeader}>
-              <p className={styles.kicker}>Protocol</p>
-              <h2>Logs</h2>
-            </div>
-            {logs.length === 0 ? (
-              <p className={styles.panelNote}>No DTF traffic logged yet.</p>
-            ) : (
-              <ol className={styles.logList}>
-                {logs.map((entry) => (
-                  <li key={entry.id}>
-                    <time dateTime={entry.time}>{new Date(entry.time).toLocaleTimeString()}</time>
-                    <span>{entry.line}</span>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
         </section>
       </div>
     </main>

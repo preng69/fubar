@@ -372,45 +372,6 @@
   text-align: center;
 }
 
-.logPanel {
-  margin-top: 22px;
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 8px;
-  background: rgba(239, 249, 233, 0.18);
-  box-shadow: 0 18px 48px rgba(43, 78, 51, 0.12);
-  backdrop-filter: blur(14px);
-}
-
-.logList {
-  display: grid;
-  gap: 6px;
-  max-height: 220px;
-  margin: 0;
-  padding: 0;
-  overflow: auto;
-  list-style: none;
-}
-
-.logList li {
-  display: grid;
-  grid-template-columns: 82px 1fr;
-  gap: 10px;
-  align-items: start;
-  color: rgba(20, 53, 40, 0.82);
-  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: 0.76rem;
-  line-height: 1.35;
-}
-
-.logList time {
-  color: rgba(20, 53, 40, 0.58);
-}
-
-.logList span {
-  overflow-wrap: anywhere;
-}
-
 @media (max-width: 980px) {
   .grid {
     grid-template-columns: 1fr 1fr;

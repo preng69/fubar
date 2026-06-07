@@ -20,11 +20,6 @@ export async function fetchUploads() {
   return readJson(response);
 }
 
-export async function fetchLogs() {
-  const response = await fetch("/api/logs");
-  return readJson(response);
-}
-
 export async function downloadDiscoveredFile(file) {
   const response = await fetch("/api/download", {
     method: "POST",

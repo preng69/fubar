@@ -20,7 +20,6 @@ const DEFAULT_CHUNK_SIZE = 64 * 1024;
 const DEFAULT_HTTP_PORT = 8787;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 20;
-const MAX_LOG_ENTRIES = 200;
 
 export function createDtfServer(options = {}) {
   const listenPort = Number(options.port ?? process.env.DTF_PORT ?? DTF_DEFAULT_PORT);
@@ -243,10 +242,6 @@ function createHttpApp({ dataset, files, localPeer, webDistDir, logger }) {
     }
   };
 
-  logger.subscribe((entry) => {
-    broadcast({ type: "log", entry });
-  });
-
   const httpServer = http.createServer((request, response) => {
     response.setHeader("Access-Control-Allow-Origin", "*");
     response.setHeader("Access-Control-Allow-Headers", "content-type");
@@ -305,13 +300,6 @@ function createHttpApp({ dataset, files, localPeer, webDistDir, logger }) {
       return;
     }
 
-    if (url.pathname === "/api/logs") {
-      sendJson(response, 200, {
-        records: logger.entries()
-      });
-      return;
-    }
-
     if (url.pathname === "/api/discover") {
       void handleDiscoverRequest({ url, response, localPeer, logger });
       return;
@@ -360,12 +348,6 @@ function createHttpApp({ dataset, files, localPeer, webDistDir, logger }) {
         peerCount: dataset.peers.length,
         uploadsDir: dataset.uploadsDir,
         downloadsDir: dataset.downloadsDir
-      })
-    );
-    socket.send(
-      JSON.stringify({
-        type: "logs",
-        records: logger.entries()
       })
     );
     socket.on("close", () => sockets.delete(socket));
@@ -919,35 +901,9 @@ function positiveInt(value, fallback) {
 }
 
 function createServerLogger() {
-  const records = [];
-  const subscribers = new Set();
-
   return {
     write(line) {
-      const entry = {
-        id: `${Date.now()}-${records.length}`,
-        time: new Date().toISOString(),
-        line
-      };
-
-      records.push(entry);
-
-      if (records.length > MAX_LOG_ENTRIES) {
-        records.shift();
-      }
-
       console.log(line);
-
-      for (const subscriber of subscribers) {
-        subscriber(entry);
-      }
-    },
-    entries() {
-      return [...records];
-    },
-    subscribe(handler) {
-      subscribers.add(handler);
-      return () => subscribers.delete(handler);
     }
   };
 }
