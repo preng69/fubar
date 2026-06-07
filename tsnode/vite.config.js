@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const bridgeTarget = `http://127.0.0.1:${process.env.DTF_HTTP_PORT ?? "8787"}`;
+const serverTarget = `http://127.0.0.1:${process.env.DTF_HTTP_PORT ?? "8787"}`;
 
 export default defineConfig({
   plugins: [react()],
@@ -11,9 +11,9 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     proxy: {
-      "/api": bridgeTarget,
+      "/api": serverTarget,
       "/ws": {
-        target: bridgeTarget,
+        target: serverTarget,
         ws: true
       }
     }

@@ -34,7 +34,6 @@ export function createDtfServer(options = {}) {
       listenPort,
       chunkSize: options.chunkSize
     });
-  const bridgeEnabled = options.bridge !== false;
   const httpPort = Number(options.httpPort ?? process.env.DTF_HTTP_PORT ?? DEFAULT_HTTP_PORT);
   const httpHost = options.httpHost ?? process.env.DTF_HTTP_HOST ?? host;
   const socket = dgram.createSocket("udp4");
@@ -84,16 +83,14 @@ export function createDtfServer(options = {}) {
     }
   });
 
-  const bridge = bridgeEnabled
-    ? createBridge({ dataset, files: apiFiles, localPeer, webDistDir: options.webDistDir, logger })
-    : undefined;
+  const httpApp = createHttpApp({ dataset, files: apiFiles, localPeer, webDistDir: options.webDistDir, logger });
   logger.write(`DTF peer listening on ${host}:${listenPort}`);
 
   return {
     socket,
     dtf,
-    httpServer: bridge?.httpServer,
-    wsServer: bridge?.wsServer,
+    httpServer: httpApp.httpServer,
+    wsServer: httpApp.wsServer,
     uploadsDir: dataset.uploadsDir,
     downloadsDir: dataset.downloadsDir,
     host,
@@ -121,28 +118,23 @@ export function createDtfServer(options = {}) {
             return;
           }
 
-          if (!bridge) {
-            resolve(socket.address());
-            return;
-          }
-
           const onHttpError = (error) => {
-            bridge.httpServer.off("listening", onHttpListening);
+            httpApp.httpServer.off("listening", onHttpListening);
             reject(error);
           };
           const onHttpListening = () => {
-            bridge.httpServer.off("error", onHttpError);
+            httpApp.httpServer.off("error", onHttpError);
           };
 
-          bridge.httpServer.once("error", onHttpError);
-          bridge.httpServer.once("listening", onHttpListening);
-          bridge.httpServer.listen(httpPort, httpHost, () => {
-            bridge.httpServer.off("error", onHttpError);
-            bridge.broadcast({
+          httpApp.httpServer.once("error", onHttpError);
+          httpApp.httpServer.once("listening", onHttpListening);
+          httpApp.httpServer.listen(httpPort, httpHost, () => {
+            httpApp.httpServer.off("error", onHttpError);
+            httpApp.broadcast({
               type: "server-status",
               status: "online",
               udp: socket.address(),
-              http: bridge.httpServer.address()
+              http: httpApp.httpServer.address()
             });
             resolve(socket.address());
           });
@@ -152,13 +144,9 @@ export function createDtfServer(options = {}) {
     close() {
       dtf.dispose();
       return new Promise((resolve) => {
-        bridge?.wsServer.close();
+        httpApp.wsServer.close();
         const closeUdp = () => socket.close(resolve);
-        if (bridge) {
-          bridge.httpServer.close(closeUdp);
-        } else {
-          closeUdp();
-        }
+        httpApp.httpServer.close(closeUdp);
       });
     }
   };
@@ -236,15 +224,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`DTF UDP server listening on ${address.address}:${address.port}`);
     console.log(`Serving uploads from ${server.uploadsDir}`);
     console.log(`Saving downloads to ${server.downloadsDir}`);
-    if (server.httpServer) {
-      const httpAddress = server.httpServer.address();
-      console.log(`DTF bridge listening on http://${httpAddress.address}:${httpAddress.port}`);
-    }
+    const httpAddress = server.httpServer.address();
+    console.log(`DTF app listening on http://${httpAddress.address}:${httpAddress.port}`);
     console.log("Use this machine's local WiFi IP from other devices on the same network.");
   }
 }
 
-function createBridge({ dataset, files, localPeer, webDistDir, logger }) {
+function createHttpApp({ dataset, files, localPeer, webDistDir, logger }) {
   const sockets = new Set();
   const staticRoot = path.resolve(webDistDir ?? process.env.DTF_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
   const broadcast = (message) => {

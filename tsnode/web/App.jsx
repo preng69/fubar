@@ -32,7 +32,7 @@ export default function App() {
       return `${health.data.peer.name} - ${total} files`;
     }
 
-    return total ? `${total} files` : "DTF bridge";
+    return total ? `${total} files` : "DTF server";
   }, [health.data, total]);
   const download = useMutation({
     mutationFn: downloadDiscoveredFile,

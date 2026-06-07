@@ -140,10 +140,10 @@ Then open:
 http://localhost:8787
 ```
 
-This serves the React frontend, HTTP API, WebSocket bridge, and DTF UDP server
-from one Node process.
+This serves the React frontend, HTTP API, WebSocket updates, and DTF UDP server
+from one Node.js server.
 
-During frontend development, you can still start the backend bridge:
+During frontend development, you can still start the Node.js server:
 
 ```sh
 npm run server
@@ -155,4 +155,4 @@ In another terminal, start the Vite frontend:
 npm run dev
 ```
 
-The frontend proxies `/api` and `/ws` to the Node bridge on port `8787`.
+The frontend proxies `/api` and `/ws` to the Node.js server on port `8787`.
