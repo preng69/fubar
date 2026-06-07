@@ -166,7 +166,7 @@ export default function App() {
                       <p>Available from</p>
                       <div className={styles.peers}>
                         {file.peers.map((peer) => (
-                          <span key={peer.peerId}>{peer.name}</span>
+                          <span key={peer.peerId}>{peerDisplayName(peer)}</span>
                         ))}
                       </div>
                     </div>
@@ -227,15 +227,43 @@ function uniquePeers(records) {
     }
   }
 
-  return [...peers.values()].sort((left, right) => left.name.localeCompare(right.name));
+  return [...peers.values()].sort((left, right) => peerDisplayName(left).localeCompare(peerDisplayName(right)));
 }
 
 function formatConnectedPeers(peers) {
   if (peers.length <= 2) {
-    return `Connected peers: ${peers.map((peer) => peer.name).join(", ")}`;
+    return `Connected peers: ${peers.map(peerDisplayName).join(", ")}`;
   }
 
   return `Connected peers: ${peers.length}`;
+}
+
+function peerDisplayName(peer) {
+  const name = peer.name?.trim();
+
+  if (name) {
+    return name;
+  }
+
+  const address = peerAddress(peer);
+
+  if (address) {
+    return address;
+  }
+
+  return `Peer ${String(peer.peerId).slice(0, 8)}`;
+}
+
+function peerAddress(peer) {
+  if (typeof peer.address === "string" && peer.address.trim()) {
+    return peer.address;
+  }
+
+  if (peer.address?.address) {
+    return peer.address.port ? `${peer.address.address}:${peer.address.port}` : peer.address.address;
+  }
+
+  return "";
 }
 
 function formatBytes(bytes) {
