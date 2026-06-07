@@ -119,30 +119,6 @@ export interface DtfAvailableFilesResponse<TAddress = unknown> {
   records: Array<DtfAvailableFile<TAddress>>;
 }
 
-export interface DtfHelloRequest {
-  peerId: HexPeerId;
-  name?: string;
-  listenPort?: number;
-}
-
-export interface DtfRangeRequest {
-  fileId: HexFileId;
-  fromOffset: number;
-  toOffset: number;
-  sessionId?: string;
-  signal?: AbortSignal;
-}
-
-export interface DtfRangeData {
-  requestId: string;
-  fileId: HexFileId;
-  requestedFrom: number;
-  requestedTo: number;
-  dataOffset: number;
-  dataCrc32: number;
-  data: Uint8Array;
-}
-
 export interface DtfPacketHeader {
   type: DtfMessageType;
   flags: number;
@@ -324,13 +300,6 @@ export interface DtfDownloadProgress {
   completed: boolean;
 }
 
-export interface DtfDownloadOptions {
-  chunkSize?: number;
-  sessionId?: string;
-  signal?: AbortSignal;
-  onProgress?: (progress: DtfDownloadProgress) => void;
-}
-
 export interface DtfMockDataset {
   localPeer: DtfPeer;
   peers: DtfPeer[];
@@ -351,13 +320,3 @@ export type DtfErrorCode =
   | "timeout"
   | "crc-mismatch"
   | "integrity-check-failed";
-
-export class DtfMockError extends Error {
-  readonly code: DtfErrorCode;
-
-  constructor(code: DtfErrorCode, message: string) {
-    super(message);
-    this.name = "DtfMockError";
-    this.code = code;
-  }
-}
