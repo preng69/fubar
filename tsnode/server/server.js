@@ -24,13 +24,14 @@ const MAX_PAGE_SIZE = 20;
 export function createDtfServer(options = {}) {
   const listenPort = Number(options.port ?? process.env.DTF_PORT ?? DTF_DEFAULT_PORT);
   const host = options.host ?? process.env.DTF_HOST ?? "0.0.0.0";
+  const peerName = options.peerName ?? process.env.DTF_PEER_NAME ?? randomAdultPeerName();
   const dataset =
     options.dataset ??
     loadDatasetFromUploadsSync({
       uploadsDir: options.uploadsDir,
       downloadsDir: options.downloadsDir,
       peerId: options.peerId ?? process.env.DTF_PEER_ID,
-      peerName: options.peerName,
+      peerName,
       listenPort,
       chunkSize: options.chunkSize
     });
@@ -41,7 +42,7 @@ export function createDtfServer(options = {}) {
   const logger = createServerLogger();
   const localPeer = {
     ...dataset.localPeer,
-    name: options.peerName ?? process.env.DTF_PEER_NAME ?? dataset.localPeer.name,
+    name: peerName,
     listenPort
   };
   const files = dataset.files.map(({ peerIds, ...file }) => file);
@@ -893,6 +894,66 @@ function sessionIdFromUuid() {
   const hex = randomUUID().replace(/-/g, "").slice(0, 16);
   const sessionId = BigInt(`0x${hex}`);
   return sessionId === 0n ? 1n : sessionId;
+}
+
+function randomAdultPeerName() {
+  const firstNames = [
+    "Amber",
+    "Anastasia",
+    "Aria",
+    "Aurora",
+    "Bella",
+    "Bianca",
+    "Carmen",
+    "Dante",
+    "Diamond",
+    "Electra",
+    "Jade",
+    "Jasmine",
+    "Lola",
+    "Lucia",
+    "Max",
+    "Raven",
+    "Rocco",
+    "Ruby",
+    "Sasha",
+    "Scarlett",
+    "Sienna",
+    "Stella",
+    "Valentina",
+    "Viktor",
+    "Violet"
+  ];
+  const lastNames = [
+    "Blaze",
+    "Dare",
+    "Devine",
+    "Fever",
+    "Foxx",
+    "Lust",
+    "Moreau",
+    "Nights",
+    "Nova",
+    "Raine",
+    "Ryder",
+    "Sinclair",
+    "Sinz",
+    "Starr",
+    "Steele",
+    "Stone",
+    "Storm",
+    "Valentine",
+    "Velvet",
+    "Vixen",
+    "Wilde",
+    "X"
+  ];
+
+  return `${randomChoice(firstNames)} ${randomChoice(lastNames)}`;
+}
+
+function randomChoice(values) {
+  return values[Math.floor(Math.random() * values.length)];
 }
 
 function positiveInt(value, fallback) {

@@ -46,6 +46,10 @@ try {
     throw new Error(`Expected two serving peers for the available file, got ${file.peers.length}`);
   }
 
+  if (file.peers.some((peer) => !peer.name)) {
+    throw new Error("Expected discovered peers to include names from hello");
+  }
+
   let progressEvents = 0;
   let attributedProgressEvents = 0;
   const bytes = await client.downloadFile(file, {

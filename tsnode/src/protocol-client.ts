@@ -201,7 +201,10 @@ export class DtfProtocolClient<TAddress = unknown> {
       );
     }
 
-    const records = mergeDiscoveredFileRecords(successes.flatMap((result) => result.records));
+    const records = await this.enrichDiscoveredPeerRecords(
+      mergeDiscoveredFileRecords(successes.flatMap((result) => result.records)),
+      options.signal
+    );
 
     return {
       requestId: successes[0].requestId,
@@ -606,6 +609,55 @@ export class DtfProtocolClient<TAddress = unknown> {
       throw new DtfProtocolError("cancelled", "DTF request cancelled");
     }
   }
+
+  private async enrichDiscoveredPeerRecords(
+    records: Array<DtfDiscoveredFileRecord<TAddress>>,
+    signal: AbortSignal | undefined
+  ): Promise<Array<DtfDiscoveredFileRecord<TAddress>>> {
+    const peers = uniqueDiscoveredPeers(
+      records.flatMap((record) => record.peers),
+      this.addressEquals
+    );
+
+    if (peers.length === 0) {
+      return records;
+    }
+
+    const sessions = await Promise.allSettled(
+      peers.map(async (peer) => ({
+        discoveredPeer: peer,
+        session: await this.hello(peer.address, { signal, attempts: 1 })
+      }))
+    );
+    const peersById = new Map(
+      sessions.flatMap((result) => {
+        if (result.status !== "fulfilled") {
+          return [];
+        }
+
+        return [
+          [
+            result.value.discoveredPeer.peerId,
+            {
+              ...result.value.discoveredPeer,
+              name: result.value.session.peer.name,
+              listenPort: result.value.session.peer.listenPort
+            }
+          ]
+        ];
+      })
+    );
+
+    if (peersById.size === 0) {
+      return records;
+    }
+
+    return records.map((record) => ({
+      ...record,
+      tags: [...record.tags],
+      peers: record.peers.map((peer) => peersById.get(peer.peerId) ?? peer)
+    }));
+  }
 }
 
 export function createDtfProtocolClient<TAddress>(
@@ -693,6 +745,25 @@ function uniqueAddresses<TAddress>(
   for (const address of addresses) {
     if (!unique.some((candidate) => addressEquals(candidate, address))) {
       unique.push(address);
+    }
+  }
+
+  return unique;
+}
+
+function uniqueDiscoveredPeers<TAddress>(
+  peers: Array<DtfDiscoveredFileRecord<TAddress>["peers"][number]>,
+  addressEquals: (left: TAddress, right: TAddress) => boolean
+): Array<DtfDiscoveredFileRecord<TAddress>["peers"][number]> {
+  const unique: Array<DtfDiscoveredFileRecord<TAddress>["peers"][number]> = [];
+
+  for (const peer of peers) {
+    if (
+      !unique.some(
+        (candidate) => candidate.peerId === peer.peerId || addressEquals(candidate.address, peer.address)
+      )
+    ) {
+      unique.push(peer);
     }
   }
 
