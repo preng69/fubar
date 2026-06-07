@@ -18,6 +18,12 @@ def app_header_title(peer_name: str) -> str:
     return f"{APP_NAME} - {normalized}"
 
 
+def file_list_title(filter_active: bool, filter_text: str) -> str:
+    if filter_active or filter_text:
+        return f"Files matching /{filter_text}"
+    return "Files"
+
+
 def selected_index(explicit_key: str | None, cursor_row: int, row_count: int) -> int | None:
     if explicit_key is not None:
         try:

@@ -12,6 +12,7 @@ from dtf.tui_helpers import (
     collision_safe_path,
     copy_into_served_folder,
     download_path_for,
+    file_list_title,
     refresh_shared_files,
     safe_filename,
     selected_index,
@@ -24,6 +25,12 @@ class TuiHelpersTest(unittest.TestCase):
         self.assertEqual(APP_NAME, "DTF boss")
         self.assertEqual(app_header_title("green robert"), "DTF boss - green robert")
         self.assertEqual(app_header_title(""), "DTF boss")
+
+    def test_file_list_title_shows_filter(self) -> None:
+        self.assertEqual(file_list_title(False, ""), "Files")
+        self.assertEqual(file_list_title(True, ""), "Files matching /")
+        self.assertEqual(file_list_title(True, "abc"), "Files matching /abc")
+        self.assertEqual(file_list_title(False, "abc"), "Files matching /abc")
 
     def test_selected_index_prefers_explicit_key_and_falls_back_to_cursor(self) -> None:
         self.assertEqual(selected_index("1", cursor_row=0, row_count=3), 1)

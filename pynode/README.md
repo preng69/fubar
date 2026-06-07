@@ -31,15 +31,16 @@ PYTHONPATH=pynode python3 -m dtf.cli web ./shared
 
 Then open `http://127.0.0.1:8080`.
 
-The TUI serves `./shared`, discovers peers with broadcast, lists peer files, and
-downloads selected files into `$HOME/Downloads`. Downloads use swarm mode: the
-app refreshes local peer discovery, finds every discovered peer that offers the
-same file ID, then downloads ranges in parallel from those peers. Each
-successful download is also copied into the served folder so it becomes
+The TUI serves `./shared`, discovers peers with broadcast, lists all available
+files alphabetically, and shows which peers each file is available from.
+Downloads use swarm mode: the app downloads ranges in parallel from every
+discovered peer that offers the selected file ID. Each successful download lands
+in `$HOME/Downloads` and is also copied into the served folder so it becomes
 available to other peers.
-Peer discovery starts automatically when the TUI opens, and the highlighted peer
-is listed automatically when selection moves. Use `p` and `f` to refresh peers
-or files manually.
+Peer and file discovery starts automatically when the TUI opens. Use `p` to
+refresh the full catalogue manually, arrow keys to highlight a file, and `d` to
+download it. Press `/` to filter visible files by a case-insensitive filename
+substring; Backspace removes filter characters, and Esc clears the filter.
 If `--name` is omitted, the peer starts with a random two-word name such as
 `green robert`.
 The default broadcast target is derived from this machine's local IPv4 address
