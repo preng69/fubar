@@ -14,7 +14,6 @@ from .catalog import (
     CatalogFile,
     available_from_label,
     build_catalog,
-    filter_catalog_by_name,
     records_by_peer_to_peer_files,
 )
 from .files import DEFAULT_CHUNK_SIZE, index_paths
@@ -26,9 +25,13 @@ from .tui_helpers import (
     copy_into_served_folder,
     download_path_for,
     file_list_title,
+    file_query_for_filter,
     refresh_shared_files,
     selected_index,
 )
+
+
+FILTER_DEBOUNCE_SECONDS: float = 0.3
 
 
 class DtfTuiApp(App[None]):
@@ -94,6 +97,9 @@ class DtfTuiApp(App[None]):
         self.selected_catalog_key: str | None = None
         self.filter_active: bool = False
         self.filter_text: str = ""
+        self._filter_timer: threading.Timer | None = None
+        self._catalog_refresh_generation: int = 0
+        self._catalog_refresh_lock: threading.Lock = threading.Lock()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -115,6 +121,7 @@ class DtfTuiApp(App[None]):
         self.action_refresh_catalog()
 
     def on_unmount(self) -> None:
+        self._cancel_filter_timer()
         self.server.stop()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -130,7 +137,8 @@ class DtfTuiApp(App[None]):
         if _is_filter_start_key(event) and not self.filter_active:
             self.filter_active = True
             self.filter_text = ""
-            self._apply_catalog_filter()
+            self._set_catalog_title()
+            self._schedule_filter_refresh()
             event.stop()
             event.prevent_default()
             return
@@ -145,13 +153,19 @@ class DtfTuiApp(App[None]):
             self.filter_text = self.filter_text[:-1]
             if not self.filter_text:
                 self.filter_active = False
-            self._apply_catalog_filter()
+                self._set_catalog_title()
+                self._cancel_filter_timer()
+                self._start_catalog_refresh()
+            else:
+                self._set_catalog_title()
+                self._schedule_filter_refresh()
             event.stop()
             event.prevent_default()
             return
         if event.character and _is_filter_character(event.character):
             self.filter_text += event.character
-            self._apply_catalog_filter()
+            self._set_catalog_title()
+            self._schedule_filter_refresh()
             event.stop()
             event.prevent_default()
 
@@ -170,8 +184,8 @@ class DtfTuiApp(App[None]):
                 self._set_status(f"Selected {selected_file.name} from {len(selected_file.sources)} source(s)")
 
     def action_refresh_catalog(self) -> None:
-        self._set_status("Finding peers and files via broadcast...")
-        self._run_thread("refresh-catalog", self._refresh_catalog_worker)
+        self._cancel_filter_timer()
+        self._start_catalog_refresh(force_discovery=True)
 
     def action_download_file(self) -> None:
         selected_file: CatalogFile | None = self._selected_catalog_file()
@@ -185,19 +199,46 @@ class DtfTuiApp(App[None]):
         count: int = refresh_shared_files(self.peer, self.served_folder, chunk_size=self.chunk_size)
         self._set_status(f"Serving {count} file(s) from {self.served_folder}")
 
-    def _refresh_catalog_worker(self) -> None:
-        try:
-            peers: list[DiscoveredPeer] = self.peer.discover_peers(self.broadcast_targets, timeout=0.7, attempts=2)
-        except Exception as exc:
-            self.call_from_thread(self._set_status, f"Peer discovery failed: {exc}")
-            return
+    def _start_catalog_refresh(self, force_discovery: bool = False) -> None:
+        query_kind, query = file_query_for_filter(self.filter_text)
+        generation: int = self._next_catalog_refresh_generation()
+        if query:
+            self._set_status(f"Searching peers for /{query}...")
+        elif force_discovery:
+            self._set_status("Finding peers and files via broadcast...")
+        else:
+            self._set_status("Refreshing files from peers...")
+        self._run_thread(
+            "refresh-catalog",
+            lambda: self._refresh_catalog_worker(
+                query_kind=query_kind,
+                query=query,
+                force_discovery=force_discovery,
+                generation=generation,
+            ),
+        )
+
+    def _refresh_catalog_worker(
+        self,
+        query_kind: QueryKind,
+        query: str,
+        force_discovery: bool,
+        generation: int,
+    ) -> None:
+        peers: list[DiscoveredPeer] = [] if force_discovery else list(self.peers)
+        if not peers:
+            try:
+                peers = self.peer.discover_peers(self.broadcast_targets, timeout=0.7, attempts=2)
+            except Exception as exc:
+                self.call_from_thread(self._set_status_if_current, generation, f"Peer discovery failed: {exc}")
+                return
         records_by_peer: dict[Address, list[FileRecord]] = {}
         for discovered_peer in peers:
             try:
                 responses: list[Files] = self.peer.find(
                     discovered_peer.address,
-                    query_kind=QueryKind.LIST_ALL,
-                    query="",
+                    query_kind=query_kind,
+                    query=query,
                     max_results=100,
                     timeout=0.7,
                     attempts=2,
@@ -210,7 +251,7 @@ class DtfTuiApp(App[None]):
                 record for response in responses for record in response.records
             ]
         catalog: list[CatalogFile] = build_catalog(records_by_peer_to_peer_files(peers, records_by_peer))
-        self.call_from_thread(self._set_catalog, peers, catalog)
+        self.call_from_thread(self._set_catalog_if_current, generation, peers, catalog)
 
     def _download_file_worker(self, selected_file: CatalogFile) -> None:
         try:
@@ -241,11 +282,21 @@ class DtfTuiApp(App[None]):
     def _set_catalog(self, peers: list[DiscoveredPeer], catalog: list[CatalogFile]) -> None:
         self.peers = peers
         self.catalog = catalog
-        self._apply_catalog_filter()
+        self._render_catalog()
         self._set_catalog_status()
 
-    def _apply_catalog_filter(self) -> None:
-        self.visible_catalog = filter_catalog_by_name(self.catalog, self.filter_text)
+    def _set_catalog_if_current(
+        self,
+        generation: int,
+        peers: list[DiscoveredPeer],
+        catalog: list[CatalogFile],
+    ) -> None:
+        if not self._is_current_catalog_refresh(generation):
+            return
+        self._set_catalog(peers, catalog)
+
+    def _render_catalog(self) -> None:
+        self.visible_catalog = list(self.catalog)
         table: DataTable = self.query_one("#catalog", DataTable)
         table.clear()
         self.selected_catalog_key = None
@@ -267,7 +318,9 @@ class DtfTuiApp(App[None]):
     def _clear_catalog_filter(self) -> None:
         self.filter_text = ""
         self.filter_active = False
-        self._apply_catalog_filter()
+        self._set_catalog_title()
+        self._cancel_filter_timer()
+        self._start_catalog_refresh()
 
     def _selected_catalog_file(self) -> CatalogFile | None:
         table: DataTable = self.query_one("#catalog", DataTable)
@@ -281,6 +334,10 @@ class DtfTuiApp(App[None]):
 
     def _set_catalog_title(self) -> None:
         self.query_one("#catalog-title", Static).update(file_list_title(self.filter_active, self.filter_text))
+
+    def _set_status_if_current(self, generation: int, message: str) -> None:
+        if self._is_current_catalog_refresh(generation):
+            self._set_status(message)
 
     def _focus_catalog(self) -> None:
         self.query_one("#catalog", DataTable).focus()
@@ -300,6 +357,36 @@ class DtfTuiApp(App[None]):
     def _run_thread(self, name: str, target: Callable[[], None]) -> None:
         thread: threading.Thread = threading.Thread(target=target, name=f"dtf-tui-{name}", daemon=True)
         thread.start()
+
+    def _schedule_filter_refresh(self) -> None:
+        self._cancel_filter_timer()
+        self._invalidate_catalog_refresh()
+        timer: threading.Timer = threading.Timer(
+            FILTER_DEBOUNCE_SECONDS,
+            lambda: self.call_from_thread(self._start_catalog_refresh),
+        )
+        timer.daemon = True
+        self._filter_timer = timer
+        timer.start()
+
+    def _cancel_filter_timer(self) -> None:
+        timer: threading.Timer | None = self._filter_timer
+        if timer is not None:
+            timer.cancel()
+        self._filter_timer = None
+
+    def _next_catalog_refresh_generation(self) -> int:
+        with self._catalog_refresh_lock:
+            self._catalog_refresh_generation += 1
+            return self._catalog_refresh_generation
+
+    def _invalidate_catalog_refresh(self) -> None:
+        with self._catalog_refresh_lock:
+            self._catalog_refresh_generation += 1
+
+    def _is_current_catalog_refresh(self, generation: int) -> bool:
+        with self._catalog_refresh_lock:
+            return generation == self._catalog_refresh_generation
 
 
 def run_tui(

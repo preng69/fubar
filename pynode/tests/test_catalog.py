@@ -3,11 +3,9 @@ from __future__ import annotations
 import unittest
 
 from dtf.catalog import (
-    CatalogFile,
     PeerFile,
     available_from_label,
     build_catalog,
-    filter_catalog_by_name,
     peer_display_name,
     records_by_peer_to_peer_files,
 )
@@ -68,38 +66,6 @@ class CatalogTest(unittest.TestCase):
         peer_files = records_by_peer_to_peer_files([peer], {peer.address: [record]})
 
         self.assertEqual(peer_files, [PeerFile(peer, record)])
-
-    def test_filter_catalog_by_name_matches_case_insensitively(self) -> None:
-        catalog: list[CatalogFile] = [
-            _catalog_file("alpha Report.txt"),
-            _catalog_file("budget.csv"),
-            _catalog_file("REPORT-final.pdf"),
-        ]
-
-        self.assertEqual(
-            [item.name for item in filter_catalog_by_name(catalog, "report")],
-            ["alpha Report.txt", "REPORT-final.pdf"],
-        )
-        self.assertEqual(
-            [item.name for item in filter_catalog_by_name(catalog, "PHA r")],
-            ["alpha Report.txt"],
-        )
-
-    def test_filter_catalog_by_name_empty_query_returns_all_files(self) -> None:
-        catalog: list[CatalogFile] = [_catalog_file("alpha.txt"), _catalog_file("bravo.txt")]
-
-        self.assertEqual(filter_catalog_by_name(catalog, ""), catalog)
-
-
-def _catalog_file(name: str) -> CatalogFile:
-    return build_catalog(
-        [
-            PeerFile(
-                DiscoveredPeer(("10.0.0.2", 4747), 1, 4747, "one"),
-                FileRecord(name.encode("utf-8").ljust(32, b"x")[:32], 10, 4096, name, "text/plain"),
-            )
-        ]
-    )[0]
 
 
 if __name__ == "__main__":

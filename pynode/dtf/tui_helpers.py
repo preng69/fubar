@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .files import DEFAULT_CHUNK_SIZE, index_paths
 from .peer import DTFPeer, DiscoveredPeer
-from .protocol import FileRecord
+from .protocol import FileRecord, QueryKind
 
 
 APP_NAME: str = "DTF boss"
@@ -22,6 +22,12 @@ def file_list_title(filter_active: bool, filter_text: str) -> str:
     if filter_active or filter_text:
         return f"Files matching /{filter_text}"
     return "Files"
+
+
+def file_query_for_filter(filter_text: str) -> tuple[QueryKind, str]:
+    if filter_text:
+        return QueryKind.SUBSTRING, filter_text
+    return QueryKind.LIST_ALL, ""
 
 
 def selected_index(explicit_key: str | None, cursor_row: int, row_count: int) -> int | None:

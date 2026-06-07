@@ -13,11 +13,13 @@ from dtf.tui_helpers import (
     copy_into_served_folder,
     download_path_for,
     file_list_title,
+    file_query_for_filter,
     refresh_shared_files,
     safe_filename,
     selected_index,
     served_copy_path_for,
 )
+from dtf.protocol import QueryKind
 
 
 class TuiHelpersTest(unittest.TestCase):
@@ -31,6 +33,10 @@ class TuiHelpersTest(unittest.TestCase):
         self.assertEqual(file_list_title(True, ""), "Files matching /")
         self.assertEqual(file_list_title(True, "abc"), "Files matching /abc")
         self.assertEqual(file_list_title(False, "abc"), "Files matching /abc")
+
+    def test_file_query_for_filter_uses_remote_substring_for_filter_text(self) -> None:
+        self.assertEqual(file_query_for_filter(""), (QueryKind.LIST_ALL, ""))
+        self.assertEqual(file_query_for_filter("report"), (QueryKind.SUBSTRING, "report"))
 
     def test_selected_index_prefers_explicit_key_and_falls_back_to_cursor(self) -> None:
         self.assertEqual(selected_index("1", cursor_row=0, row_count=3), 1)

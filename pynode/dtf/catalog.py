@@ -79,13 +79,6 @@ def build_catalog(peer_files: Iterable[PeerFile]) -> list[CatalogFile]:
     return sorted(catalog, key=lambda item: (item.name.lower(), item.file_size, item.file_id))
 
 
-def filter_catalog_by_name(catalog: Iterable[CatalogFile], query: str) -> list[CatalogFile]:
-    normalized_query: str = query.casefold()
-    if not normalized_query:
-        return list(catalog)
-    return [item for item in catalog if normalized_query in item.name.casefold()]
-
-
 def records_by_peer_to_peer_files(
     peers: Iterable[DiscoveredPeer],
     records_by_peer: dict[Address, Iterable[FileRecord]],

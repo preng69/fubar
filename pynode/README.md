@@ -39,7 +39,7 @@ in `$HOME/Downloads` and is also copied into the served folder so it becomes
 available to other peers.
 Peer and file discovery starts automatically when the TUI opens. Use `p` to
 refresh the full catalogue manually, arrow keys to highlight a file, and `d` to
-download it. Press `/` to filter visible files by a case-insensitive filename
+download it. Press `/` to search peers remotely with a case-insensitive filename
 substring; Backspace removes filter characters, and Esc clears the filter.
 If `--name` is omitted, the peer starts with a random two-word name such as
 `green robert`.
