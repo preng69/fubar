@@ -23,6 +23,14 @@ Run the combined server/client Textual TUI:
 PYTHONPATH=pynode python3 -m dtf.cli tui ./shared
 ```
 
+Run the same Textual frontend in a browser:
+
+```sh
+PYTHONPATH=pynode python3 -m dtf.cli web ./shared
+```
+
+Then open `http://127.0.0.1:8080`.
+
 The TUI serves `./shared`, discovers peers with broadcast, lists peer files, and
 downloads selected files into `$HOME/Downloads`. Downloads use swarm mode: the
 app refreshes local peer discovery, finds every discovered peer that offers the
@@ -70,6 +78,7 @@ From the `pynode` directory:
 ```sh
 make serve SERVE_PATHS=./shared PORT=4747
 make tui SERVE_PATHS=./shared
+make web SERVE_PATHS=./shared
 make peers
 make peers TARGETS=192.168.1.255:4747 ARGS="--timeout 1"
 make find PEER=127.0.0.1:4747 KIND=substring QUERY=report
