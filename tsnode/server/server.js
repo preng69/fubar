@@ -41,6 +41,7 @@ export function createDtfServer(options = {}) {
   const subscribers = new Set();
   const logger = createServerLogger();
   const transfers = createTransferTracker();
+  const startupId = randomUUID();
   const localPeer = {
     ...dataset.localPeer,
     name: peerName,
@@ -137,6 +138,7 @@ export function createDtfServer(options = {}) {
           httpApp.httpServer.once("listening", onHttpListening);
           httpApp.httpServer.listen(httpPort, httpHost, () => {
             httpApp.httpServer.off("error", onHttpError);
+            httpApp.broadcast({ type: "server-started", startupId });
             httpApp.broadcast({
               type: "server-status",
               status: "online",

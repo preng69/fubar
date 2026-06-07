@@ -13,6 +13,7 @@ const flagPositions = Array.from({ length: 22 }, (_, index) => ({
 export default function App() {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState("connecting");
+  const [startupLoading, setStartupLoading] = useState(true);
   const [transferActive, setTransferActive] = useState(false);
   const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
@@ -44,6 +45,11 @@ export default function App() {
   const activeDownloadId = download.variables?.fileId;
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => setStartupLoading(false), 3000);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
     socket.addEventListener("open", () => setStatus("online"));
@@ -55,6 +61,8 @@ export default function App() {
           setTransferActive(Boolean(message.transfer?.active));
         } else if (message.type === "transfer-status") {
           setTransferActive(Boolean(message.active));
+        } else if (message.type === "server-started") {
+          refreshOnceForStartup(message.startupId);
         }
       } catch {
         setStatus("online");
@@ -80,7 +88,7 @@ export default function App() {
           />
         ))}
       </div>
-      {transferActive ? <div className={styles.transferSpinner} aria-hidden="true" /> : null}
+      {startupLoading || transferActive ? <div className={styles.transferSpinner} aria-hidden="true" /> : null}
 
       <header className={styles.header}>
         <div>
@@ -188,6 +196,21 @@ export default function App() {
       </div>
     </main>
   );
+}
+
+function refreshOnceForStartup(startupId) {
+  if (!startupId || typeof window === "undefined") {
+    return;
+  }
+
+  const key = "dtf-refreshed-startup-id";
+
+  if (window.sessionStorage.getItem(key) === startupId) {
+    return;
+  }
+
+  window.sessionStorage.setItem(key, startupId);
+  window.setTimeout(() => window.location.reload(), 100);
 }
 
 function uniquePeers(records) {
