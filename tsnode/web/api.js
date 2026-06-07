@@ -31,6 +31,24 @@ export async function downloadDiscoveredFile(file) {
   return readJson(response);
 }
 
+export async function requestDeleteFile(file, peer) {
+  const response = await fetch("/api/delete-request", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ file, peer })
+  });
+  return readJson(response);
+}
+
+export async function answerDeleteRequest(requestId, decision) {
+  const response = await fetch(`/api/delete-requests/${requestId}/${decision}`, {
+    method: "POST"
+  });
+  return readJson(response);
+}
+
 async function readJson(response) {
   const body = await response.json();
 

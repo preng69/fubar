@@ -1,7 +1,7 @@
 import dgram from "node:dgram";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -247,6 +247,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
 function createHttpApp({ dataset, files, localPeer, webDistDir, logger, transfers }) {
   const sockets = new Set();
+  const pendingDeleteRequests = new Map();
   const staticRoot = path.resolve(webDistDir ?? process.env.DTF_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
   const broadcast = (message) => {
     const body = JSON.stringify(message);
@@ -276,6 +277,35 @@ function createHttpApp({ dataset, files, localPeer, webDistDir, logger, transfer
 
     if (url.pathname === "/api/download" && request.method === "POST") {
       void handleDownloadRequest({ request, response, dataset, logger, transfers });
+      return;
+    }
+
+    if (url.pathname === "/api/delete-request" && request.method === "POST") {
+      void handleOutgoingDeleteRequest({ request, response, localPeer, logger, httpServer });
+      return;
+    }
+
+    if (url.pathname === "/api/delete-requests" && request.method === "POST") {
+      void handleIncomingDeleteRequest({ request, response, localPeer, pendingDeleteRequests, broadcast, sockets, logger });
+      return;
+    }
+
+    const deleteDecisionMatch = /^\/api\/delete-requests\/([^/]+)\/(accept|deny)$/.exec(url.pathname);
+    if (deleteDecisionMatch && request.method === "POST") {
+      void handleDeleteDecision({
+        requestId: deleteDecisionMatch[1],
+        decision: deleteDecisionMatch[2],
+        response,
+        dataset,
+        pendingDeleteRequests,
+        broadcast,
+        logger
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/delete-request-decisions" && request.method === "POST") {
+      void handleDeleteRequestDecisionCallback({ request, response, broadcast, logger });
       return;
     }
 
@@ -375,6 +405,191 @@ function createHttpApp({ dataset, files, localPeer, webDistDir, logger, transfer
     wsServer,
     broadcast
   };
+}
+
+async function handleOutgoingDeleteRequest({ request, response, localPeer, logger, httpServer }) {
+  try {
+    const body = await readJsonBody(request);
+    const file = body.file;
+    const peer = body.peer;
+    const targetUrl = deleteRequestUrlForPeer(peer);
+    const httpAddress = httpServer.address();
+    const callbackPort = typeof httpAddress === "object" && httpAddress ? httpAddress.port : DEFAULT_HTTP_PORT;
+
+    if (!file?.fileId || !file?.name || !peer?.peerId || !targetUrl) {
+      sendJson(response, 400, { error: "invalid-delete-request" });
+      return;
+    }
+
+    logger.write(`Requesting deletion of ${file.name} from ${peerDisplayName(peer)}`);
+
+    const targetResponse = await fetch(targetUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        file: {
+          fileId: file.fileId,
+          name: file.name,
+          fileSize: file.fileSize,
+          mediaType: file.mediaType
+        },
+        requester: {
+          peerId: localPeer.peerId,
+          name: localPeer.name
+        },
+        callbackPort
+      })
+    });
+    const result = await readFetchJson(targetResponse);
+
+    if (!targetResponse.ok) {
+      sendJson(response, targetResponse.status, result);
+      return;
+    }
+
+    sendJson(response, 200, {
+      ok: true,
+      requestId: result.requestId,
+      peer: {
+        peerId: peer.peerId,
+        name: peer.name
+      }
+    });
+  } catch (error) {
+    logger.write(`Delete request failed: ${error instanceof Error ? error.message : "Delete request failed"}`);
+    sendJson(response, 502, {
+      error: "delete-request-failed",
+      message: error instanceof Error ? error.message : "Delete request failed"
+    });
+  }
+}
+
+async function handleIncomingDeleteRequest({
+  request,
+  response,
+  localPeer,
+  pendingDeleteRequests,
+  broadcast,
+  sockets,
+  logger
+}) {
+  try {
+    const body = await readJsonBody(request);
+    const file = body.file;
+    const requester = body.requester;
+    const callbackPort = positiveInt(body.callbackPort, DEFAULT_HTTP_PORT);
+    const callbackHost = normalizeRemoteAddress(request.socket.remoteAddress);
+
+    if (!file?.fileId || !file?.name || !requester?.peerId || !callbackHost) {
+      sendJson(response, 400, { error: "invalid-delete-request" });
+      return;
+    }
+
+    if (sockets.size === 0) {
+      sendJson(response, 409, {
+        error: "no-local-ui",
+        message: "No local browser is connected to approve the delete request."
+      });
+      return;
+    }
+
+    const requestId = randomUUID();
+    const pending = {
+      id: requestId,
+      file,
+      requester,
+      callbackUrl: `http://${callbackHost}:${callbackPort}/api/delete-request-decisions`
+    };
+
+    pendingDeleteRequests.set(requestId, pending);
+    logger.write(`${requester.name || requester.peerId} requested deletion of ${file.name}`);
+    broadcast({
+      type: "delete-request",
+      request: {
+        id: requestId,
+        file,
+        requester,
+        targetPeer: localPeer
+      }
+    });
+    sendJson(response, 202, { ok: true, requestId });
+  } catch (error) {
+    sendJson(response, 400, {
+      error: "invalid-delete-request",
+      message: error instanceof Error ? error.message : "Invalid delete request"
+    });
+  }
+}
+
+async function handleDeleteDecision({ requestId, decision, response, dataset, pendingDeleteRequests, broadcast, logger }) {
+  const pending = pendingDeleteRequests.get(requestId);
+
+  if (!pending) {
+    sendJson(response, 404, { error: "delete-request-not-found" });
+    return;
+  }
+
+  pendingDeleteRequests.delete(requestId);
+
+  let deleted = false;
+  let message = `${pending.requester.name || pending.requester.peerId} denied deletion of ${pending.file.name}`;
+
+  try {
+    if (decision === "accept") {
+      const deletedFile = await deleteUploadByFileId(dataset.uploadsDir, pending.file.fileId);
+      deleted = true;
+      message = `Deleted ${deletedFile.name} after approval`;
+      logger.write(message);
+    } else {
+      logger.write(message);
+    }
+
+    const callbackBody = {
+      requestId,
+      file: pending.file,
+      decision,
+      deleted,
+      message
+    };
+
+    await postDeleteDecision(pending.callbackUrl, callbackBody, logger);
+    broadcast({ type: "delete-request-resolved", requestId, decision, deleted, message });
+    sendJson(response, 200, { ok: true, decision, deleted });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Delete decision failed";
+    logger.write(`Delete decision failed: ${errorMessage}`);
+    await postDeleteDecision(
+      pending.callbackUrl,
+      {
+        requestId,
+        file: pending.file,
+        decision: "error",
+        deleted: false,
+        message: errorMessage
+      },
+      logger
+    );
+    sendJson(response, 500, { error: "delete-decision-failed", message: errorMessage });
+  }
+}
+
+async function handleDeleteRequestDecisionCallback({ request, response, broadcast, logger }) {
+  try {
+    const body = await readJsonBody(request);
+    logger.write(`Delete request result for ${body.file?.name ?? "file"}: ${body.message ?? body.decision}`);
+    broadcast({
+      type: "delete-request-decision",
+      result: body
+    });
+    sendJson(response, 200, { ok: true });
+  } catch (error) {
+    sendJson(response, 400, {
+      error: "invalid-delete-decision",
+      message: error instanceof Error ? error.message : "Invalid delete decision"
+    });
+  }
 }
 
 async function serveStaticApp({ url, response, staticRoot }) {
@@ -662,6 +877,87 @@ function formatAddresses(addresses) {
 function sendJson(response, status, body) {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(body));
+}
+
+async function readFetchJson(response) {
+  const text = await response.text();
+
+  if (!text) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
+}
+
+function deleteRequestUrlForPeer(peer) {
+  const host = peer?.address?.address ?? (typeof peer?.address === "string" ? peer.address : "");
+
+  if (!host) {
+    return "";
+  }
+
+  return `http://${normalizeHttpHost(host)}:${peer.httpPort ?? DEFAULT_HTTP_PORT}/api/delete-requests`;
+}
+
+function normalizeHttpHost(value) {
+  return String(value).replace(/^::ffff:/, "");
+}
+
+function normalizeRemoteAddress(value) {
+  if (!value) {
+    return "";
+  }
+
+  const normalized = normalizeHttpHost(value);
+  return normalized === "::1" ? "127.0.0.1" : normalized;
+}
+
+function peerDisplayName(peer) {
+  return peer?.name || peer?.peerId || "peer";
+}
+
+async function deleteUploadByFileId(uploadsDir, fileId) {
+  for (const filePath of collectUploadFilesSync(uploadsDir)) {
+    const bytes = await readFile(filePath);
+    const candidateFileId = createHash("sha256").update(bytes).digest("hex");
+
+    if (candidateFileId !== fileId) {
+      continue;
+    }
+
+    const relative = path.relative(uploadsDir, filePath);
+
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("Refusing to delete outside uploads folder");
+    }
+
+    await rm(filePath);
+
+    return {
+      name: path.relative(uploadsDir, filePath).split(path.sep).join("/"),
+      path: filePath
+    };
+  }
+
+  throw new Error("File is no longer present in uploads");
+}
+
+async function postDeleteDecision(callbackUrl, body, logger) {
+  try {
+    await fetch(callbackUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+  } catch (error) {
+    logger.write(`Could not notify requester: ${error instanceof Error ? error.message : "notification failed"}`);
+  }
 }
 
 function loadDatasetFromUploadsSync(options = {}) {

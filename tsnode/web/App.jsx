@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { downloadDiscoveredFile, fetchDiscoveredFiles, fetchHealth, fetchUploads } from "./api.js";
+import {
+  answerDeleteRequest,
+  downloadDiscoveredFile,
+  fetchDiscoveredFiles,
+  fetchHealth,
+  fetchUploads,
+  requestDeleteFile
+} from "./api.js";
 import styles from "./App.module.css";
 
 const flagPositions = Array.from({ length: 22 }, (_, index) => ({
@@ -15,6 +22,9 @@ export default function App() {
   const [status, setStatus] = useState("connecting");
   const [startupLoading, setStartupLoading] = useState(true);
   const [transferActive, setTransferActive] = useState(false);
+  const [contextMenu, setContextMenu] = useState();
+  const [deleteRequests, setDeleteRequests] = useState([]);
+  const [notice, setNotice] = useState();
   const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
   const uploads = useQuery({ queryKey: ["uploads"], queryFn: fetchUploads });
@@ -42,6 +52,30 @@ export default function App() {
       void queryClient.invalidateQueries({ queryKey: ["uploads"] });
     }
   });
+  const deleteMutation = useMutation({
+    async mutationFn(file) {
+      const peers = file.peers ?? [];
+      const results = await Promise.allSettled(peers.map((peer) => requestDeleteFile(file, peer)));
+      const failed = results.filter((result) => result.status === "rejected").length;
+
+      return { requested: peers.length - failed, failed };
+    },
+    onSuccess(result) {
+      setNotice({
+        title: "Delete request sent",
+        body:
+          result.failed > 0
+            ? `${result.requested} peer${result.requested === 1 ? "" : "s"} contacted, ${result.failed} failed.`
+            : `${result.requested} peer${result.requested === 1 ? "" : "s"} asked for approval.`
+      });
+    },
+    onError(error) {
+      setNotice({
+        title: "Delete request failed",
+        body: error instanceof Error ? error.message : "Could not send delete request."
+      });
+    }
+  });
   const activeDownloadId = download.variables?.fileId;
 
   useEffect(() => {
@@ -63,6 +97,17 @@ export default function App() {
           setTransferActive(Boolean(message.active));
         } else if (message.type === "server-started") {
           refreshOnceForStartup(message.startupId);
+        } else if (message.type === "delete-request") {
+          setDeleteRequests((current) => [...current, message.request]);
+        } else if (message.type === "delete-request-resolved") {
+          setDeleteRequests((current) => current.filter((request) => request.id !== message.requestId));
+          void queryClient.invalidateQueries({ queryKey: ["uploads"] });
+        } else if (message.type === "delete-request-decision") {
+          setNotice({
+            title: "Delete request answered",
+            body: message.result?.message ?? "The peer answered your delete request."
+          });
+          void queryClient.invalidateQueries({ queryKey: ["discovered-files"] });
         }
       } catch {
         setStatus("online");
@@ -72,6 +117,20 @@ export default function App() {
     socket.addEventListener("error", () => setStatus("offline"));
     return () => socket.close();
   }, []);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return undefined;
+    }
+
+    const close = () => setContextMenu(undefined);
+    window.addEventListener("click", close);
+    window.addEventListener("contextmenu", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+    };
+  }, [contextMenu]);
 
   return (
     <main className={styles.shell}>
@@ -135,7 +194,14 @@ export default function App() {
           ) : (
             <section className={styles.grid} aria-busy={discoveredFiles.isLoading}>
               {records.map((file) => (
-                <article className={styles.card} key={file.fileId}>
+                <article
+                  className={styles.card}
+                  key={file.fileId}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenu({ file, x: event.clientX, y: event.clientY });
+                  }}
+                >
                   <div className={styles.cardTop}>
                     <span className={styles.media}>{file.mediaType || "application/octet-stream"}</span>
                     <span>{formatBytes(file.fileSize)}</span>
@@ -194,7 +260,88 @@ export default function App() {
           </nav>
         </section>
       </div>
+      {contextMenu ? (
+        <div className={styles.contextMenu} style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <button
+            type="button"
+            onClick={() => {
+              download.mutate(contextMenu.file);
+              setContextMenu(undefined);
+            }}
+          >
+            Download
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              deleteMutation.mutate(contextMenu.file);
+              setContextMenu(undefined);
+            }}
+          >
+            Request delete from peers
+          </button>
+        </div>
+      ) : null}
+      {deleteRequests[0] ? (
+        <DecisionDialog
+          request={deleteRequests[0]}
+          onAnswer={async (decision) => {
+            await answerDeleteRequest(deleteRequests[0].id, decision);
+          }}
+        />
+      ) : null}
+      {notice ? <NoticeDialog notice={notice} onClose={() => setNotice(undefined)} /> : null}
     </main>
+  );
+}
+
+function DecisionDialog({ request, onAnswer }) {
+  const [pending, setPending] = useState(false);
+
+  async function answer(decision) {
+    setPending(true);
+
+    try {
+      await onAnswer(decision);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className={styles.dialogBackdrop}>
+      <section className={styles.dialog}>
+        <p className={styles.kicker}>Delete request</p>
+        <h2>{request.requester?.name || "A peer"} wants to delete this file</h2>
+        <p>{request.file?.name}</p>
+        <p className={styles.dialogMeta}>{request.file?.fileId}</p>
+        <div className={styles.dialogActions}>
+          <button type="button" disabled={pending} onClick={() => void answer("deny")}>
+            Deny
+          </button>
+          <button type="button" disabled={pending} onClick={() => void answer("accept")}>
+            Accept
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function NoticeDialog({ notice, onClose }) {
+  return (
+    <div className={styles.dialogBackdrop}>
+      <section className={styles.dialog}>
+        <p className={styles.kicker}>Peer response</p>
+        <h2>{notice.title}</h2>
+        <p>{notice.body}</p>
+        <div className={styles.dialogActions}>
+          <button type="button" onClick={onClose}>
+            OK
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
