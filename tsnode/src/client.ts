@@ -22,6 +22,9 @@ interface ByteRange {
   toOffset: number;
 }
 
+const DEFAULT_PARALLEL_REQUESTS_PER_PEER = 10;
+const MIN_OVERRIDDEN_PARALLEL_REQUESTS = 5;
+
 export class DtfClient<TAddress = unknown> {
   readonly localPeer: DtfPeer;
 
@@ -82,7 +85,7 @@ export class DtfClient<TAddress = unknown> {
     const chunkSize = options.chunkSize ?? file.chunkSize;
     const ranges = splitRanges(file.fileSize, chunkSize);
     const target = new Uint8Array(file.fileSize);
-    const maxParallelRequests = Math.max(1, Math.min(options.maxParallelRequests ?? sessions.length, sessions.length));
+    const maxParallelRequests = resolveMaxParallelRequests(sessions.length, options.maxParallelRequests);
     let completedRanges = 0;
     let nextRangeIndex = 0;
 
@@ -188,4 +191,16 @@ function splitRanges(fileSize: number, chunkSize: number): ByteRange[] {
   }
 
   return ranges;
+}
+
+function resolveMaxParallelRequests(peerCount: number, requested: number | undefined): number {
+  if (requested === undefined) {
+    return Math.max(1, peerCount * DEFAULT_PARALLEL_REQUESTS_PER_PEER);
+  }
+
+  if (!Number.isFinite(requested)) {
+    return MIN_OVERRIDDEN_PARALLEL_REQUESTS;
+  }
+
+  return Math.max(MIN_OVERRIDDEN_PARALLEL_REQUESTS, Math.floor(requested));
 }

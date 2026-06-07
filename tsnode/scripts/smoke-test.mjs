@@ -72,6 +72,10 @@ try {
   if ((network.rangeRequests.get("ada") ?? 0) === 0 || (network.rangeRequests.get("build") ?? 0) === 0) {
     throw new Error("Expected parallel download to request ranges from both serving peers");
   }
+
+  if (network.peakActiveRangeRequests !== 5) {
+    throw new Error(`Expected maxParallelRequests below 5 to clamp to 5, got ${network.peakActiveRangeRequests}`);
+  }
 } finally {
   client.dispose();
 
@@ -85,12 +89,25 @@ console.log("DTF package smoke test passed");
 function createMultiServerMemoryTransports(addresses, routes = new Map()) {
   const clientHandlers = new Set();
   const rangeRequests = new Map(addresses.map((address) => [address, 0]));
+  const activeRangeRequestAddresses = new Map();
+  let activeRangeRequests = 0;
+  let peakActiveRangeRequests = 0;
   const serverHandlersByAddress = new Map(addresses.map((address) => [address, new Set()]));
   const serverTransports = new Map(
     addresses.map((address) => [
       address,
       {
         send(bytes, _address) {
+          const packet = decodeDtfPacket(bytes);
+
+          if (
+            (packet?.type === DtfMessageType.RangeDone || packet?.type === DtfMessageType.Error) &&
+            activeRangeRequestAddresses.get(packet.requestId) === address
+          ) {
+            activeRangeRequestAddresses.delete(packet.requestId);
+            activeRangeRequests -= 1;
+          }
+
           for (const handler of [...clientHandlers]) {
             handler({ bytes, address });
           }
@@ -119,6 +136,9 @@ function createMultiServerMemoryTransports(addresses, routes = new Map()) {
 
         if (packet?.type === DtfMessageType.GetRange) {
           rangeRequests.set(routedAddress, (rangeRequests.get(routedAddress) ?? 0) + 1);
+          activeRangeRequestAddresses.set(packet.requestId, routedAddress);
+          activeRangeRequests += 1;
+          peakActiveRangeRequests = Math.max(peakActiveRangeRequests, activeRangeRequests);
         }
 
         for (const handler of [...handlers]) {
@@ -132,7 +152,14 @@ function createMultiServerMemoryTransports(addresses, routes = new Map()) {
     }
   };
 
-  return { clientTransport, rangeRequests, serverTransports };
+  return {
+    clientTransport,
+    rangeRequests,
+    serverTransports,
+    get peakActiveRangeRequests() {
+      return peakActiveRangeRequests;
+    }
+  };
 }
 
 function bytesEqual(left, right) {
