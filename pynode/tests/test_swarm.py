@@ -8,6 +8,7 @@ from pathlib import Path
 from dtf.peer import Address, DTFPeer, DiscoveredPeer
 from dtf.protocol import FileRecord, Files
 from dtf.swarm import (
+    DEFAULT_CONCURRENT_RANGES_PER_PEER,
     SwarmSource,
     download_swarm,
     find_swarm_sources,
@@ -123,6 +124,26 @@ class SwarmTest(unittest.TestCase):
             self.assertEqual(result.source_count, 2)
             self.assertEqual(result.range_count, 6)
             self.assertGreater(len({call[0] for call in fake_peer.calls}), 1)
+
+    def test_default_concurrent_ranges_per_peer_is_ten(self) -> None:
+        self.assertEqual(DEFAULT_CONCURRENT_RANGES_PER_PEER, 10)
+
+    def test_download_swarm_rejects_non_positive_concurrency(self) -> None:
+        payload: bytes = b"abc"
+        file_id: bytes = hashlib.sha256(payload).digest()
+        peer_info: DiscoveredPeer = DiscoveredPeer(("10.0.0.2", 4747), 1, 4747, "one")
+        record: FileRecord = FileRecord(file_id, len(payload), 4096, "demo.bin", "application/octet-stream")
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError):
+                download_swarm(
+                    FakeRangePeer(payload),
+                    [SwarmSource(peer=peer_info, record=record)],
+                    file_id,
+                    len(payload),
+                    Path(directory) / "out.bin",
+                    concurrent_ranges_per_peer=0,
+                )
 
     def test_download_swarm_retries_failed_range(self) -> None:
         payload: bytes = b"abcdefghij"

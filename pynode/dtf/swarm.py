@@ -11,6 +11,7 @@ from .protocol import DEFAULT_MAX_DATAGRAM, FileRecord, QueryKind
 
 
 DEFAULT_SWARM_RANGE_SIZE: int = 64 * 1024
+DEFAULT_CONCURRENT_RANGES_PER_PEER: int = 10
 
 
 @dataclass(frozen=True)
@@ -109,14 +110,18 @@ def download_swarm(
     max_datagram: int = DEFAULT_MAX_DATAGRAM,
     timeout: float = 1.0,
     attempts_per_range: int = 4,
+    concurrent_ranges_per_peer: int = DEFAULT_CONCURRENT_RANGES_PER_PEER,
 ) -> SwarmDownloadResult:
     if not sources:
         raise ValueError("at least one swarm source is required")
+    if concurrent_ranges_per_peer <= 0:
+        raise ValueError("concurrent_ranges_per_peer must be positive")
     tasks: list[RangeTask] = split_ranges(file_size, range_size=range_size)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("wb") as output:
         output.truncate(file_size)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(sources)) as executor:
+        max_workers: int = len(sources) * concurrent_ranges_per_peer
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             pending: dict[concurrent.futures.Future[RangeResult], tuple[RangeTask, SwarmSource]] = {}
             source_index: int = 0
             for task in tasks:

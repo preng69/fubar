@@ -115,6 +115,23 @@ class PeerRangeTest(unittest.TestCase):
         self.assertEqual(_short_id(123456789836), "..9836")
         self.assertEqual(_short_id(b"\x00\x01\xab\xcd"), "..abcd")
 
+    def test_range_data_is_not_logged(self) -> None:
+        logs: list[str] = []
+        peer: DTFPeer = DTFPeer(peer_id=b"p" * 16, logger=logs.append)
+        header: Header = Header(
+            message_type=MessageType.RANGE_DATA,
+            flags=0,
+            payload_len=0,
+            request_id=123456,
+            session_id=654321,
+            sender_id=b"p" * 16,
+        )
+
+        peer._log("RX", header, ("127.0.0.1", 4747))
+        peer._log("TX", header, ("127.0.0.1", 4747))
+
+        self.assertEqual(logs, [])
+
     def test_shared_files_can_be_replaced_safely(self) -> None:
         peer: DTFPeer = DTFPeer(logger=lambda _line: None)
         shared_file: SharedFile = SharedFile(
@@ -130,6 +147,25 @@ class PeerRangeTest(unittest.TestCase):
         peer.set_shared_files([shared_file])
 
         self.assertEqual(peer.get_shared_files(), [shared_file])
+
+    def test_hello_reuses_cached_peer_session(self) -> None:
+        peer: DTFPeer = DTFPeer(logger=lambda _line: None)
+        address: tuple[str, int] = ("127.0.0.1", 4747)
+        peer.peer_sessions[address] = 1234
+        peer.sessions[1234] = address
+
+        self.assertEqual(peer.hello(address), 1234)
+
+    def test_forget_session_removes_both_session_indexes(self) -> None:
+        peer: DTFPeer = DTFPeer(logger=lambda _line: None)
+        address: tuple[str, int] = ("127.0.0.1", 4747)
+        peer.peer_sessions[address] = 1234
+        peer.sessions[1234] = address
+
+        peer.forget_session(address)
+
+        self.assertEqual(peer.peer_sessions, {})
+        self.assertEqual(peer.sessions, {})
 
     def test_background_server_initial_state_and_stop_are_safe(self) -> None:
         peer: DTFPeer = DTFPeer(logger=lambda _line: None)

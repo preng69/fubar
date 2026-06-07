@@ -184,10 +184,12 @@ class DTFPeer:
         self.shared_files: list[SharedFile] = list(shared_files)
         self.peer_id: bytes = peer_id or random_peer_id()
         self.sessions: dict[int, Address] = {}
+        self.peer_sessions: dict[Address, int] = {}
         self.cancelled_requests: set[int] = set()
         self.logger: Logger = logger or print
         self.max_range_bytes: int = max_range_bytes
         self._shared_files_lock: threading.RLock = threading.RLock()
+        self._sessions_lock: threading.RLock = threading.RLock()
 
     def set_shared_files(self, shared_files: Iterable[SharedFile]) -> None:
         with self._shared_files_lock:
@@ -269,27 +271,39 @@ class DTFPeer:
         peer: Address,
         timeout: float = 0.5,
         attempts: int = 3,
+        force: bool = False,
     ) -> int:
+        if not force:
+            with self._sessions_lock:
+                cached_session_id: int | None = self.peer_sessions.get(peer)
+            if cached_session_id is not None:
+                return cached_session_id
         request: Hello = Hello(listen_port=self.listen_port, name=self.name)
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.bind(("", 0))
-            for _ in range(attempts):
-                request_id: int = random_u64()
-                self._send(sock, peer, MessageType.HELLO, request, request_id=request_id, session_id=0)
-                deadline: float = time.monotonic() + timeout
-                while time.monotonic() < deadline:
-                    packet_message: tuple[Packet, PayloadMessage, Address] | None = self._recv_payload(sock, deadline)
-                    if packet_message is None:
-                        break
-                    packet, message, address = packet_message
-                    if (
-                        address == peer
-                        and packet.header.request_id == request_id
-                        and packet.header.message_type == MessageType.HELLO_ACK
-                        and isinstance(message, HelloAck)
-                    ):
-                        self.sessions[packet.header.session_id] = peer
-                        return packet.header.session_id
+        with self._sessions_lock:
+            if not force:
+                cached_session_id = self.peer_sessions.get(peer)
+                if cached_session_id is not None:
+                    return cached_session_id
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.bind(("", 0))
+                for _ in range(attempts):
+                    request_id: int = random_u64()
+                    self._send(sock, peer, MessageType.HELLO, request, request_id=request_id, session_id=0)
+                    deadline: float = time.monotonic() + timeout
+                    while time.monotonic() < deadline:
+                        packet_message: tuple[Packet, PayloadMessage, Address] | None = self._recv_payload(sock, deadline)
+                        if packet_message is None:
+                            break
+                        packet, message, address = packet_message
+                        if (
+                            address == peer
+                            and packet.header.request_id == request_id
+                            and packet.header.message_type == MessageType.HELLO_ACK
+                            and isinstance(message, HelloAck)
+                        ):
+                            self.sessions[packet.header.session_id] = peer
+                            self.peer_sessions[peer] = packet.header.session_id
+                            return packet.header.session_id
         raise TimeoutError(f"no HELLO_ACK from {peer[0]}:{peer[1]}")
 
     def download(
@@ -338,7 +352,50 @@ class DTFPeer:
         timeout: float = 1.0,
         attempts: int = 4,
     ) -> bytes:
-        session_id: int = self.hello(peer)
+        try:
+            return self._download_range_with_session_cache(
+                peer=peer,
+                file_id=file_id,
+                start=start,
+                end=end,
+                max_datagram=max_datagram,
+                timeout=timeout,
+                attempts=attempts,
+                force_hello=False,
+            )
+        except RuntimeError as exc:
+            if "DTF error 3:" not in str(exc):
+                raise
+            self.forget_session(peer)
+            return self._download_range_with_session_cache(
+                peer=peer,
+                file_id=file_id,
+                start=start,
+                end=end,
+                max_datagram=max_datagram,
+                timeout=timeout,
+                attempts=attempts,
+                force_hello=True,
+            )
+
+    def forget_session(self, peer: Address) -> None:
+        with self._sessions_lock:
+            session_id: int | None = self.peer_sessions.pop(peer, None)
+            if session_id is not None:
+                self.sessions.pop(session_id, None)
+
+    def _download_range_with_session_cache(
+        self,
+        peer: Address,
+        file_id: bytes,
+        start: int,
+        end: int,
+        max_datagram: int,
+        timeout: float,
+        attempts: int,
+        force_hello: bool,
+    ) -> bytes:
+        session_id: int = self.hello(peer, force=force_hello)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.bind(("", 0))
             return self._download_range(
@@ -625,6 +682,8 @@ class DTFPeer:
         )
 
     def _log(self, direction: str, header: Header, address: Address, detail: str = "") -> None:
+        if header.message_type == MessageType.RANGE_DATA:
+            return
         detail_suffix: str = f" {detail}" if detail else ""
         self.logger(
             f"{direction} {message_type_name(header.message_type)} "
