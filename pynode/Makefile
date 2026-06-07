@@ -14,7 +14,7 @@ FILE_ID ?= 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 OUTPUT ?= ./downloaded-file
 ARGS ?=
 
-.PHONY: serve peers find download tui test
+.PHONY: serve peers find download tui web test
 
 serve:
 	$(DTF) $(NAME_ARGS) --port $(PORT) serve $(SERVE_PATHS) $(ARGS)
@@ -30,6 +30,9 @@ download:
 
 tui:
 	$(DTF) $(NAME_ARGS) --port $(PORT) tui $(SERVE_PATHS) $(ARGS)
+
+web:
+	$(DTF) $(NAME_ARGS) --port $(PORT) web $(SERVE_PATHS) --host 127.0.0.1 --web-port 8080 $(ARGS)
 
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s tests

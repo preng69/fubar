@@ -74,6 +74,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="broadcast target host or host:port; defaults to local IPv4 with .255 last octet",
     )
 
+    web: argparse.ArgumentParser = subparsers.add_parser("web", help="run the Textual frontend on localhost")
+    web.add_argument("served_folder", type=Path, help="local folder to serve")
+    web.add_argument("--host", default="127.0.0.1", help="web host to bind")
+    web.add_argument("--web-port", type=int, default=8080, help="web port to bind")
+    web.add_argument(
+        "--broadcast-target",
+        action="append",
+        default=[],
+        help="broadcast target host or host:port; defaults to local IPv4 with .255 last octet",
+    )
+
     return parser
 
 
@@ -172,6 +183,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             name=peer_name,
             port=args.port,
             broadcast_targets=targets,
+        )
+        return 0
+
+    if args.command == "web":
+        from .web import run_web
+
+        targets = [parse_peer(target, default_port=args.port) for target in args.broadcast_target]
+        if not targets:
+            targets = [default_broadcast_target(args.port)]
+        run_web(
+            served_folder=args.served_folder,
+            name=peer_name,
+            dtf_port=args.port,
+            broadcast_targets=targets,
+            host=args.host,
+            web_port=args.web_port,
         )
         return 0
 
