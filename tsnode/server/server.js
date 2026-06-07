@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
@@ -513,7 +514,9 @@ function readJsonBody(request) {
 async function handleDiscoverRequest({ url, response, localPeer, logger }) {
   const page = positiveInt(url.searchParams.get("page"), 1);
   const pageSize = Math.min(positiveInt(url.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
-  const target = parseAddress(url.searchParams.get("address") ?? "10.2.0.255:4747");
+  const discoveryAddresses = url.searchParams.has("address")
+    ? [parseAddress(url.searchParams.get("address"))]
+    : discoverBroadcastAddresses();
   const socket = dgram.createSocket("udp4");
   const transport = createUdpClientTransport(socket, logger);
   const client = createDtfClient({
@@ -523,7 +526,7 @@ async function handleDiscoverRequest({ url, response, localPeer, logger }) {
       listenPort: 0
     },
     transport,
-    discoveryAddresses: [target],
+    discoveryAddresses,
     addressEquals,
     discoveryResponseTimeoutMs: positiveInt(url.searchParams.get("timeoutMs"), 500),
     acceptDiscoveryResponse() {
@@ -534,7 +537,7 @@ async function handleDiscoverRequest({ url, response, localPeer, logger }) {
   try {
     await bindUdpClient(socket);
     socket.setBroadcast(true);
-    logger.write(`Finding peers via broadcast ${target.address}:${target.port}`);
+    logger.write(`Finding peers via broadcast ${formatAddresses(discoveryAddresses)}`);
 
     const discovered = await client.findAvailableFiles({
       queryKind: "all",
@@ -568,6 +571,84 @@ async function handleDiscoverRequest({ url, response, localPeer, logger }) {
     client.dispose();
     socket.close();
   }
+}
+
+export function discoverBroadcastAddresses(options = {}) {
+  const port = positiveInt(options.port, DTF_DEFAULT_PORT);
+  const interfaces = options.interfaces ?? os.networkInterfaces();
+  const addresses = [];
+  const seen = new Set();
+
+  for (const details of Object.values(interfaces)) {
+    for (const detail of details ?? []) {
+      const broadcast = broadcastAddressForInterface(detail);
+
+      if (!broadcast || seen.has(broadcast)) {
+        continue;
+      }
+
+      seen.add(broadcast);
+      addresses.push({ address: broadcast, port });
+    }
+  }
+
+  return addresses.length > 0 ? addresses : [{ address: "255.255.255.255", port }];
+}
+
+function broadcastAddressForInterface(detail) {
+  const family = detail.family === "IPv4" || detail.family === 4;
+
+  if (!family || detail.internal || !detail.address || !detail.netmask) {
+    return undefined;
+  }
+
+  const address = ipv4ToUint(detail.address);
+  const netmask = ipv4ToUint(detail.netmask);
+
+  if (address === undefined || netmask === undefined) {
+    return undefined;
+  }
+
+  const broadcast = uintToIpv4(((address & netmask) | (~netmask >>> 0)) >>> 0);
+
+  if (broadcast === detail.address || broadcast === "0.0.0.0" || broadcast === "255.255.255.255") {
+    return undefined;
+  }
+
+  return broadcast;
+}
+
+function ipv4ToUint(value) {
+  const parts = String(value).split(".");
+
+  if (parts.length !== 4) {
+    return undefined;
+  }
+
+  let result = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) {
+      return undefined;
+    }
+
+    const value = Number(part);
+
+    if (value < 0 || value > 255) {
+      return undefined;
+    }
+
+    result = ((result << 8) | value) >>> 0;
+  }
+
+  return result;
+}
+
+function uintToIpv4(value) {
+  return [value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join(".");
+}
+
+function formatAddresses(addresses) {
+  return addresses.map((address) => `${address.address}:${address.port}`).join(", ");
 }
 
 function sendJson(response, status, body) {

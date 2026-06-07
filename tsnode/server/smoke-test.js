@@ -14,7 +14,7 @@ import {
   DtfMessageType,
   DtfQueryKindCode
 } from "../dist/types.js";
-import { downloadFromDtfServer, startDtfServer } from "./server.js";
+import { discoverBroadcastAddresses, downloadFromDtfServer, startDtfServer } from "./server.js";
 
 const CLIENT_PEER_ID = "22222222222222222222222222222222";
 const tempRoot = await mkdtemp(path.join(os.tmpdir(), "dtf-folders-"));
@@ -26,6 +26,38 @@ await mkdir(uploadsDir, { recursive: true });
 await mkdir(path.join(uploadsDir, "docs"), { recursive: true });
 await writeFile(path.join(uploadsDir, "docs", "folder-handbook.txt"), firstUploadBytes);
 await writeFile(path.join(uploadsDir, "tiny-index.json"), new TextEncoder().encode('{"from":"uploads"}\n'));
+
+assert.deepEqual(
+  discoverBroadcastAddresses({
+    port: 4747,
+    interfaces: {
+      en0: [
+        {
+          address: "10.2.0.42",
+          netmask: "255.255.255.0",
+          family: "IPv4",
+          internal: false
+        }
+      ]
+    }
+  }),
+  [{ address: "10.2.0.255", port: 4747 }]
+);
+assert.deepEqual(
+  discoverBroadcastAddresses({
+    interfaces: {
+      lo0: [
+        {
+          address: "127.0.0.1",
+          netmask: "255.0.0.0",
+          family: "IPv4",
+          internal: true
+        }
+      ]
+    }
+  }),
+  [{ address: "255.255.255.255", port: 4747 }]
+);
 
 const serverRun = await startDtfServer({
   host: "127.0.0.1",
