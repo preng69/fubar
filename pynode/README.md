@@ -78,8 +78,10 @@ From the `pynode` directory:
 
 ```sh
 make serve SERVE_PATHS=./shared PORT=4747
-make tui SERVE_PATHS=./shared
-make web SERVE_PATHS=./shared
+make tui
+make tui ./shared
+make web
+make web ./shared
 make peers
 make peers TARGETS=192.168.1.255:4747 ARGS="--timeout 1"
 make find PEER=127.0.0.1:4747 KIND=substring QUERY=report

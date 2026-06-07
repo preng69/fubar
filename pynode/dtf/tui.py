@@ -110,6 +110,7 @@ class DtfTuiApp(App[None]):
         catalog.add_columns("Name", "Size", "Available from", "Type", "ID")
         self.set_interval(0.25, self._drain_logs)
         self.server.start()
+        self._focus_catalog()
         self._set_status(f"Serving {len(self.peer.get_shared_files())} file(s) from {self.served_folder}")
         self.action_refresh_catalog()
 
@@ -260,6 +261,7 @@ class DtfTuiApp(App[None]):
         if self.visible_catalog:
             table.move_cursor(row=0, column=0, animate=False)
             self.selected_catalog_key = "0"
+        self._focus_catalog()
         self._set_catalog_title()
 
     def _clear_catalog_filter(self) -> None:
@@ -279,6 +281,9 @@ class DtfTuiApp(App[None]):
 
     def _set_catalog_title(self) -> None:
         self.query_one("#catalog-title", Static).update(file_list_title(self.filter_active, self.filter_text))
+
+    def _focus_catalog(self) -> None:
+        self.query_one("#catalog", DataTable).focus()
 
     def _set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message)
