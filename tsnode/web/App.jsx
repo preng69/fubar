@@ -124,11 +124,17 @@ export default function App() {
     }
 
     const close = () => setContextMenu(undefined);
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") {
+        setContextMenu(undefined);
+      }
+    };
+
     window.addEventListener("click", close);
-    window.addEventListener("contextmenu", close);
+    window.addEventListener("keydown", closeOnEscape);
     return () => {
       window.removeEventListener("click", close);
-      window.removeEventListener("contextmenu", close);
+      window.removeEventListener("keydown", closeOnEscape);
     };
   }, [contextMenu]);
 
@@ -199,6 +205,7 @@ export default function App() {
                   key={file.fileId}
                   onContextMenu={(event) => {
                     event.preventDefault();
+                    event.stopPropagation();
                     setContextMenu({ file, x: event.clientX, y: event.clientY });
                   }}
                 >
@@ -261,7 +268,15 @@ export default function App() {
         </section>
       </div>
       {contextMenu ? (
-        <div className={styles.contextMenu} style={{ left: contextMenu.x, top: contextMenu.y }}>
+        <div
+          className={styles.contextMenu}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
           <button
             type="button"
             onClick={() => {
