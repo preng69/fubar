@@ -13,6 +13,7 @@ const flagPositions = Array.from({ length: 22 }, (_, index) => ({
 export default function App() {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState("connecting");
+  const [transferActive, setTransferActive] = useState(false);
   const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
   const uploads = useQuery({ queryKey: ["uploads"], queryFn: fetchUploads });
@@ -51,6 +52,9 @@ export default function App() {
         const message = JSON.parse(event.data);
         if (message.type === "server-status") {
           setStatus(message.status);
+          setTransferActive(Boolean(message.transfer?.active));
+        } else if (message.type === "transfer-status") {
+          setTransferActive(Boolean(message.active));
         }
       } catch {
         setStatus("online");
@@ -76,6 +80,7 @@ export default function App() {
           />
         ))}
       </div>
+      {transferActive ? <div className={styles.transferSpinner} aria-hidden="true" /> : null}
 
       <header className={styles.header}>
         <div>

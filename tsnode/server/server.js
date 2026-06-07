@@ -40,6 +40,7 @@ export function createDtfServer(options = {}) {
   const socket = dgram.createSocket("udp4");
   const subscribers = new Set();
   const logger = createServerLogger();
+  const transfers = createTransferTracker();
   const localPeer = {
     ...dataset.localPeer,
     name: peerName,
@@ -60,6 +61,7 @@ export function createDtfServer(options = {}) {
   const transport = {
     send(bytes, address) {
       logDatagram(logger, "TX", bytes, address);
+      updateTransferTrackerFromPacket(transfers, "TX", bytes);
       socket.send(Buffer.from(bytes), address.port, address.address);
     },
     subscribe(handler) {
@@ -79,12 +81,16 @@ export function createDtfServer(options = {}) {
 
   socket.on("message", (bytes, address) => {
     logDatagram(logger, "RX", bytes, address);
+    updateTransferTrackerFromPacket(transfers, "RX", bytes);
     for (const subscriber of subscribers) {
       subscriber({ bytes, address });
     }
   });
 
-  const httpApp = createHttpApp({ dataset, files: apiFiles, localPeer, webDistDir: options.webDistDir, logger });
+  const httpApp = createHttpApp({ dataset, files: apiFiles, localPeer, webDistDir: options.webDistDir, logger, transfers });
+  transfers.subscribe((status) => {
+    httpApp.broadcast({ type: "transfer-status", ...status });
+  });
   logger.write(`DTF peer listening on ${host}:${listenPort}`);
 
   return {
@@ -231,7 +237,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 }
 
-function createHttpApp({ dataset, files, localPeer, webDistDir, logger }) {
+function createHttpApp({ dataset, files, localPeer, webDistDir, logger, transfers }) {
   const sockets = new Set();
   const staticRoot = path.resolve(webDistDir ?? process.env.DTF_WEB_DIST_DIR ?? DEFAULT_WEB_DIST_DIR);
   const broadcast = (message) => {
@@ -261,7 +267,7 @@ function createHttpApp({ dataset, files, localPeer, webDistDir, logger }) {
     const url = new URL(request.url, "http://localhost");
 
     if (url.pathname === "/api/download" && request.method === "POST") {
-      void handleDownloadRequest({ request, response, dataset, logger });
+      void handleDownloadRequest({ request, response, dataset, logger, transfers });
       return;
     }
 
@@ -348,9 +354,11 @@ function createHttpApp({ dataset, files, localPeer, webDistDir, logger }) {
         fileCount: files.length,
         peerCount: dataset.peers.length,
         uploadsDir: dataset.uploadsDir,
-        downloadsDir: dataset.downloadsDir
+        downloadsDir: dataset.downloadsDir,
+        transfer: transfers.status()
       })
     );
+    socket.send(JSON.stringify({ type: "transfer-status", ...transfers.status() }));
     socket.on("close", () => sockets.delete(socket));
   });
 
@@ -395,7 +403,7 @@ function safeStaticPath(staticRoot, requestPath) {
   return filePath;
 }
 
-async function handleDownloadRequest({ request, response, dataset, logger }) {
+async function handleDownloadRequest({ request, response, dataset, logger, transfers }) {
   try {
     const body = await readJsonBody(request);
     const record = body.file;
@@ -425,6 +433,7 @@ async function handleDownloadRequest({ request, response, dataset, logger }) {
       await bindUdpClient(socket);
       socket.setBroadcast(true);
       logger.write(`Downloading ${record.name}...`);
+      transfers.beginDownload();
 
       const chunksByPeer = new Map();
       const bytes = await client.downloadFile(record, {
@@ -466,6 +475,7 @@ async function handleDownloadRequest({ request, response, dataset, logger }) {
         path
       });
     } finally {
+      transfers.endDownload();
       client.dispose();
       socket.close();
     }
@@ -967,6 +977,73 @@ function createServerLogger() {
       console.log(line);
     }
   };
+}
+
+function createTransferTracker() {
+  const subscribers = new Set();
+  const uploads = new Set();
+  let downloads = 0;
+
+  const status = () => ({
+    active: downloads > 0 || uploads.size > 0,
+    downloading: downloads > 0,
+    uploading: uploads.size > 0
+  });
+  const notify = () => {
+    const current = status();
+
+    for (const subscriber of subscribers) {
+      subscriber(current);
+    }
+  };
+
+  return {
+    status,
+    beginDownload() {
+      downloads += 1;
+      notify();
+    },
+    endDownload() {
+      downloads = Math.max(0, downloads - 1);
+      notify();
+    },
+    beginUpload(requestId) {
+      if (uploads.has(requestId)) {
+        return;
+      }
+
+      uploads.add(requestId);
+      notify();
+    },
+    endUpload(requestId) {
+      if (!uploads.delete(requestId)) {
+        return;
+      }
+
+      notify();
+    },
+    subscribe(subscriber) {
+      subscribers.add(subscriber);
+      return () => subscribers.delete(subscriber);
+    }
+  };
+}
+
+function updateTransferTrackerFromPacket(transfers, direction, bytes) {
+  const packet = decodeDtfPacket(bytes);
+
+  if (!packet) {
+    return;
+  }
+
+  if (direction === "RX" && packet.type === DtfMessageType.GetRange) {
+    transfers.beginUpload(packet.requestId.toString());
+    return;
+  }
+
+  if (direction === "TX" && (packet.type === DtfMessageType.RangeDone || packet.type === DtfMessageType.Error)) {
+    transfers.endUpload(packet.requestId.toString());
+  }
 }
 
 function logDatagram(logger, direction, bytes, address) {
