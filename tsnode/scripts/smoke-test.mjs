@@ -47,6 +47,7 @@ try {
   }
 
   let progressEvents = 0;
+  let attributedProgressEvents = 0;
   const bytes = await client.downloadFile(file, {
     chunkSize: 512,
     maxDatagram: 140,
@@ -56,6 +57,10 @@ try {
 
       if (progress.fileId !== file.fileId) {
         throw new Error("Expected progress events for the downloaded file");
+      }
+
+      if (progress.peer?.peerId && progress.chunk?.toOffset > progress.chunk?.fromOffset) {
+        attributedProgressEvents += 1;
       }
     }
   });
@@ -67,6 +72,10 @@ try {
 
   if (progressEvents === 0) {
     throw new Error("Expected download progress events");
+  }
+
+  if (attributedProgressEvents !== progressEvents) {
+    throw new Error("Expected every download progress event to include peer and chunk attribution");
   }
 
   if ((network.rangeRequests.get("ada") ?? 0) === 0 || (network.rangeRequests.get("build") ?? 0) === 0) {

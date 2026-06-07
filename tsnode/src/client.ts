@@ -22,6 +22,12 @@ interface ByteRange {
   toOffset: number;
 }
 
+interface PeerCompletedRange<TAddress> {
+  completed: DtfCompletedRange;
+  peer: DtfPeer;
+  address: TAddress;
+}
+
 const DEFAULT_PARALLEL_REQUESTS_PER_PEER = 10;
 const MIN_OVERRIDDEN_PARALLEL_REQUESTS = 5;
 
@@ -95,14 +101,16 @@ export class DtfClient<TAddress = unknown> {
 
         const range = ranges[nextRangeIndex];
         nextRangeIndex += 1;
-        const completed = await this.downloadRangeFromAnyPeer(file, range, sessions, workerIndex, options);
+        const { completed, peer } = await this.downloadRangeFromAnyPeer(file, range, sessions, workerIndex, options);
         target.set(completed.data, range.fromOffset);
         completedRanges += 1;
         options.onProgress?.({
           fileId: file.fileId,
           receivedBytes: Math.min(completedRanges * chunkSize, file.fileSize),
           totalBytes: file.fileSize,
-          completed: completedRanges === ranges.length
+          completed: completedRanges === ranges.length,
+          peer,
+          chunk: range
         });
       }
     });
@@ -146,14 +154,14 @@ export class DtfClient<TAddress = unknown> {
     sessions: Array<PeerSession<TAddress>>,
     workerIndex: number,
     options: DtfDownloadAvailableFileOptions
-  ): Promise<DtfCompletedRange> {
+  ): Promise<PeerCompletedRange<TAddress>> {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt < sessions.length; attempt += 1) {
       const session = sessions[(workerIndex + attempt) % sessions.length];
 
       try {
-        return await this.protocol.getRange(session.address, {
+        const completed = await this.protocol.getRange(session.address, {
           fileId: file.fileId,
           fromOffset: BigInt(range.fromOffset),
           toOffset: BigInt(range.toOffset),
@@ -161,6 +169,12 @@ export class DtfClient<TAddress = unknown> {
           maxDatagram: options.maxDatagram,
           signal: options.signal
         });
+
+        return {
+          completed,
+          peer: session.peer,
+          address: session.address
+        };
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
       }

@@ -27,6 +27,8 @@ export default function App() {
   const uploadRecords = uploads.data?.records ?? [];
   const pageCount = discoveredFiles.data?.pageCount ?? 1;
   const total = discoveredFiles.data?.total ?? 0;
+  const connectedPeers = useMemo(() => uniquePeers(records), [records]);
+  const connectedPeerTitle = connectedPeers.length > 0 ? formatConnectedPeers(connectedPeers) : "Connected peers";
   const subtitle = useMemo(() => {
     if (health.data?.peer?.name) {
       return `${health.data.peer.name} - ${total} files`;
@@ -123,7 +125,7 @@ export default function App() {
         <section className={styles.remotePanel}>
           <div className={styles.panelHeader}>
             <p className={styles.kicker}>Peers</p>
-            <h2>Other devices</h2>
+            <h2>{connectedPeerTitle}</h2>
           </div>
           {discoveredFiles.isError ? (
             <section className={styles.empty}>Discovery unavailable: {discoveredFiles.error.message}</section>
@@ -159,11 +161,16 @@ export default function App() {
                       <span key={tag}>{tag}</span>
                     ))}
                   </div>
-                  <div className={styles.peers}>
-                    {file.peers.map((peer) => (
-                      <span key={peer.peerId}>{peer.name}</span>
-                    ))}
-                  </div>
+                  {file.peers.length > 0 ? (
+                    <div className={styles.peerBlock}>
+                      <p>Available from</p>
+                      <div className={styles.peers}>
+                        {file.peers.map((peer) => (
+                          <span key={peer.peerId}>{peer.name}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </section>
@@ -207,6 +214,28 @@ export default function App() {
       </div>
     </main>
   );
+}
+
+function uniquePeers(records) {
+  const peers = new Map();
+
+  for (const record of records) {
+    for (const peer of record.peers ?? []) {
+      if (!peers.has(peer.peerId)) {
+        peers.set(peer.peerId, peer);
+      }
+    }
+  }
+
+  return [...peers.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function formatConnectedPeers(peers) {
+  if (peers.length <= 2) {
+    return `Connected peers: ${peers.map((peer) => peer.name).join(", ")}`;
+  }
+
+  return `Connected peers: ${peers.length}`;
 }
 
 function formatBytes(bytes) {

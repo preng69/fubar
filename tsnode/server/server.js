@@ -442,14 +442,37 @@ async function handleDownloadRequest({ request, response, dataset, logger }) {
       socket.setBroadcast(true);
       logger.write(`Downloading ${record.name}...`);
 
+      const chunksByPeer = new Map();
       const bytes = await client.downloadFile(record, {
-        verifyIntegrity: true
+        verifyIntegrity: true,
+        onProgress(progress) {
+          if (!progress.peer || !progress.chunk) {
+            return;
+          }
+
+          const existing = chunksByPeer.get(progress.peer.peerId);
+          if (existing) {
+            existing.chunks += 1;
+            return;
+          }
+
+          chunksByPeer.set(progress.peer.peerId, {
+            name: progress.peer.name,
+            chunks: 1
+          });
+        }
       });
       const path = await saveCompletedUpload(record, bytes, {
         downloadsDir: dataset.downloadsDir,
         uploadsDir: dataset.uploadsDir
       });
       logger.write(`Downloaded ${record.name} (${bytes.byteLength} bytes) to ${path}`);
+      if (record.peers.length > 1 && chunksByPeer.size > 0) {
+        const summary = [...chunksByPeer.values()]
+          .map((peer) => `${peer.name} ${peer.chunks} chunk${peer.chunks === 1 ? "" : "s"}`)
+          .join(", ");
+        logger.write(`Chunk distribution for ${record.name}: ${summary}`);
+      }
 
       sendJson(response, 200, {
         ok: true,

@@ -298,6 +298,11 @@ export interface DtfDownloadProgress {
   receivedBytes: number;
   totalBytes: number;
   completed: boolean;
+  peer?: DtfPeer;
+  chunk?: {
+    fromOffset: number;
+    toOffset: number;
+  };
 }
 
 export interface DtfMockDataset {

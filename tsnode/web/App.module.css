@@ -306,6 +306,18 @@
   margin-top: 16px;
 }
 
+.peerBlock {
+  margin-top: 12px;
+}
+
+.peerBlock p {
+  margin: 0 0 8px;
+  color: rgba(20, 53, 40, 0.68);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .tags span,
 .peers span {
   min-height: 26px;
@@ -317,7 +329,7 @@
 }
 
 .peers {
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .empty {
